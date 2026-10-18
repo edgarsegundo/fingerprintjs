@@ -117,3 +117,14 @@ export function holdLoop(timeMs: number): void {
     // Do nothing
   }
 }
+
+/**
+ * Narrows a value that a test has already checked, without the forbidden `!` operator.
+ * Fails the test with a clear message if the value is missing.
+ */
+export function defined<T>(value: T | null | undefined, what = 'value'): T {
+  if (value === null || value === undefined) {
+    throw new Error(`Expected the ${what} to be defined`)
+  }
+  return value
+}

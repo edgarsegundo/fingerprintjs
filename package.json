@@ -43,7 +43,10 @@
     "test:browserstack": "karma start --preset browserstack --single-run",
     "test:browserstack:beta": "karma start --preset browserstack-beta --single-run",
     "check:dts": "tsc --isolatedModules --noEmit dist/fp.d.ts",
-    "check:ssr": "node --require './dist/fp.cjs.js' --eval '' || (echo \"The distributive files can't be used with server side rendering. Make sure the code doesn't use browser API until an exported function is called.\" && exit 1)"
+    "check:ssr": "node --require './dist/fp.cjs.js' --eval '' || (echo \"The distributive files can't be used with server side rendering. Make sure the code doesn't use browser API until an exported function is called.\" && exit 1)",
+    "server:build": "rimraf server/dist && tsc -p server/tsconfig.json",
+    "server:test": "yarn server:build && node --test \"server/dist/**/*.test.js\"",
+    "server:start": "node server/dist/main.js"
   },
   "devDependencies": {
     "@fpjs-incubator/broyster": "^0.3.0",
@@ -52,6 +55,7 @@
     "@rollup/plugin-terser": "^0.2.1",
     "@rollup/plugin-typescript": "^10.0.1",
     "@types/jasmine": "^3.10.3",
+    "@types/node": "^22",
     "@types/ua-parser-js": "^0.7.39",
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",

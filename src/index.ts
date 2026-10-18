@@ -1,4 +1,5 @@
 import { load, Agent, LoadOptions, GetOptions, GetResult, hashComponents, componentsToDebugString } from './agent'
+import { collect, collectAndSend, send, CollectOptions, CollectPayload, SendOptions, SendResult } from './collector'
 import { Confidence } from './confidence'
 import { BuiltinComponents } from './sources'
 import { Component, UnknownComponents } from './utils/entropy_source'
@@ -18,6 +19,12 @@ export {
   BuiltinComponents,
   Confidence,
 }
+
+// Experimental: collects raw signals for server-side identification (see docs/collector.md).
+// It may change in a minor version.
+// These are named exports only and aren't in the default export below: an object can't be tree-shaken, so adding
+// them there would make everyone who uses `FingerprintJS.load()` download the collector code too.
+export { collect, collectAndSend, send, CollectOptions, CollectPayload, SendOptions, SendResult }
 // The default export is a syntax sugar (`import * as FP from '...' → import FP from '...'`).
 // It should contain all the public exported values.
 export default { load, hashComponents, componentsToDebugString }

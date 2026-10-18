@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="data:," />
+    <title>Teste voluntário de identificação de navegadores</title>
+    <style>
+      :root { color-scheme: light dark; --bg: #fff; --fg: #1d2330; --muted: #5b6475; --line: #d5d9e2; --accent: #1a56db; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #14171f; --fg: #e8eaf0; --muted: #a2a9b8; --line: #343a49; --accent: #7aa2ff; } }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+      main { max-width: 640px; margin: 0 auto; padding: 24px 16px 64px; }
+      h1 { font-size: 1.4rem; margin: 0 0 8px; }
+      h2 { font-size: 1.05rem; margin: 28px 0 6px; }
+      p, li { color: var(--fg); }
+      .muted { color: var(--muted); font-size: 0.9rem; }
+      label { display: block; font-weight: 600; margin-top: 16px; }
+      input[type='text'] { width: 100%; box-sizing: border-box; padding: 10px; margin-top: 4px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+      .consent { display: flex; gap: 10px; align-items: flex-start; font-weight: 400; margin-top: 20px; }
+      .consent input { margin-top: 5px; }
+      button { margin-top: 20px; padding: 10px 18px; font: inherit; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 6px; cursor: pointer; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      #status { margin-top: 16px; padding: 12px; border-radius: 6px; border: 1px solid var(--line); }
+      #status[hidden] { display: none; }
+      #status.error { border-color: #c0392b; }
+      #status.ok { border-color: #1e8e3e; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Teste voluntário de identificação de navegadores</h1>
+      <p>
+        Estamos medindo quão bem um sistema contra fraude reconhece o <strong>mesmo aparelho</strong> em visitas
+        diferentes. Para isso precisamos de visitas reais, de aparelhos reais, ao longo de alguns dias.
+      </p>
+
+      <h2>O que será coletado</h2>
+      <ul>
+        <li>Características técnicas do navegador e do aparelho: tela, idioma, fuso horário, fontes, placa de vídeo, codecs, entre outras.</li>
+        <li>Dados de rede da conexão: seu endereço IP e detalhes técnicos de como o navegador se conecta.</li>
+        <li>O código que você informar abaixo, que liga as suas visitas entre si.</li>
+      </ul>
+
+      <h2>O que não será coletado</h2>
+      <ul>
+        <li>Nome, e-mail, telefone ou documento. Não os escreva em nenhum campo.</li>
+        <li>O que você faz em outros sites, suas senhas, seus arquivos, sua localização, câmera ou microfone.</li>
+      </ul>
+
+      <h2>Para que serve e por quanto tempo</h2>
+      <p>
+        Somente para avaliar e melhorar este sistema de detecção de fraude. Os dados não serão vendidos nem usados
+        para publicidade. Para a análise, o endereço IP é trocado por um código que não pode ser revertido. Os dados
+        serão apagados em <strong id="retention">__PRAZO__</strong>.
+      </p>
+
+      <h2>Seus direitos</h2>
+      <p>
+        Você pode desistir quando quiser: informe o seu código ao organizador (<span id="contact">__CONTATO__</span>) e
+        todas as suas visitas serão apagadas. Participar é voluntário.
+      </p>
+
+      <form id="form" novalidate>
+        <label for="participant">Código do participante <span class="muted">(informado pelo organizador)</span></label>
+        <input id="participant" type="text" autocomplete="off" maxlength="64" required />
+
+        <label for="device">Aparelho e navegador <span class="muted">(ex.: iphone-safari, notebook-chrome)</span></label>
+        <input id="device" type="text" autocomplete="off" maxlength="40" required />
+
+        <label class="consent" for="consent">
+          <input id="consent" type="checkbox" />
+          <span>Li e concordo em participar do teste, com a coleta descrita acima.</span>
+        </label>
+
+        <button id="submit" type="submit" disabled>Enviar esta visita</button>
+      </form>
+
+      <div id="status" hidden role="status" aria-live="polite"></div>
+
+      <p class="muted">
+        Texto de modelo. Quem organiza o teste deve revisá-lo com o jurídico ou o encarregado de dados antes de usar,
+        e preencher o prazo e o contato.
+      </p>
+    </main>
+    <script src="config.js"></script>
+    <script src="fp.min.js"></script>
+    <script src="calibration.js"></script>
+  </body>
+</html>

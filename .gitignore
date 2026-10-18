@@ -6,6 +6,10 @@
 /dist/
 /node_modules/
 /playground/dist/
+/server/dist/
+/server/data/
+/tools/calibration/config.js
+/tools/calibration/fp.min.js
 /resources/content_blocking/selectors_tester.html
 /resources/content_blocking/unique_filter_selectors.json
 

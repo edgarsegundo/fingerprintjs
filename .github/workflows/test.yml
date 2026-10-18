@@ -43,3 +43,22 @@ jobs:
           BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
           BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
         run: yarn test:browserstack --log-level ${{ runner.debug == '1' && 'debug' || 'info' }}
+  server:
+    name: Test the ingestion server
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      # The server uses `node:sqlite`, which needs Node 22
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Node packages
+        run: yarn install --frozen-lockfile --ignore-scripts
+      # The evaluation tests compare with the visitor id of the browser library, which needs the built bundle
+      - name: Build the browser library
+        run: yarn build
+      - name: Build and test the server
+        run: yarn server:test

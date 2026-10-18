@@ -1,0 +1,16 @@
+# Keeps the Docker build context small and keeps secrets and local files out of images
+node_modules
+**/node_modules
+dist
+server/dist
+playground/dist
+.git
+.github
+.claude
+*.pem
+*.key
+.env
+.env.*
+docs
+tests
+resources
