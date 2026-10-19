@@ -69,6 +69,7 @@
     "husky": "^9.1.7",
     "karma": "^6.4.1",
     "lint-staged": "^17.5.0",
+    "mysql2": "3.24.5",
     "prettier": "^2.7.1",
     "rimraf": "^3.0.2",
     "rollup": "^3.25.0",

@@ -1,6 +1,6 @@
 # Fase 2: servidor de ingestão e sinais de rede
 
-Status: concluída com ressalvas. Branch `fase-2-ingestao`, nada commitado. Código em [server/](../../../server/README.md).
+Status: concluída com ressalvas. Branch `v5.3.0-fork`, nada commitado. Código em [server/](../../../server/README.md).
 
 ## O que foi feito
 

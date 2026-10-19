@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { extractFeatures, FeatureInput, featureNames, ja4Normalized, volatilityOf } from './features'
+import { extractFeatures, FeatureInput, featureNames, isIdentifier, ja4Normalized, volatilityOf } from './features'
 
 const sig = (value: unknown) => ({ value, duration: 1 })
 
@@ -53,6 +53,34 @@ function visit(overrides: Partial<FeatureInput> = {}): FeatureInput {
     ...overrides,
   }
 }
+
+describe('the stored code', () => {
+  const withCode = (token: unknown): FeatureInput => {
+    const base = visit()
+    return { ...base, extended: { ...base.extended, storedId: sig({ token, foundIn: ['cookie'], created: false }) } }
+  }
+  const GOOD = 'AbCdEfGhIjKlMnOpQrStUv'
+
+  it('becomes a feature made of a digest, never the code itself', () => {
+    const features = extractFeatures(withCode(GOOD))
+    assert.match(features.storedId, /^[0-9a-f]{12}$/)
+    assert.ok(!Object.values(features).includes(GOOD))
+    assert.equal(features.storedId, extractFeatures(withCode(GOOD)).storedId, 'the same code, the same feature')
+    assert.notEqual(features.storedId, extractFeatures(withCode('ZyXwVuTsRqPoNmLkJiHgFe')).storedId)
+  })
+
+  it('is absent when there is no code, or what came is not a code', () => {
+    assert.ok(!('storedId' in extractFeatures(visit())))
+    for (const bad of [null, undefined, '', 'short', 'has space in it xxxxxxxx', 'x'.repeat(65), 42, ['a'], { a: 1 }]) {
+      assert.ok(!('storedId' in extractFeatures(withCode(bad))), String(bad))
+    }
+  })
+
+  it('is the only feature that is a code made up for one device, and it is one that changes with the site data', () => {
+    assert.deepEqual(featureNames.filter(isIdentifier), ['storedId'])
+    assert.equal(volatilityOf('storedId'), 'volatile')
+  })
+})
 
 describe('extractFeatures', () => {
   it('reads the features a visit provides', () => {

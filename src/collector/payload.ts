@@ -25,6 +25,13 @@ export type SerializedComponent = {
   duration: number
 }
 
+export interface ConsentStatement {
+  /** The legal basis the page relies on */
+  basis: 'consent' | 'legitimate_interest' | 'contract' | 'other'
+  /** The version of the privacy text that the visitor saw or accepted, such as `2026-10` */
+  version: string
+}
+
 /**
  * The raw signals sent to the server.
  *
@@ -46,6 +53,11 @@ export interface CollectPayload {
    * evaluation tools know which visits really belong together.
    */
   linkedId?: string
+  /**
+   * What the page says about the legal basis for this collection. It is a statement of the page, kept with the visit so
+   * that it can be audited later; the browser cannot prove it. A server may refuse visits that do not carry consent.
+   */
+  consent?: ConsentStatement
   /** The built-in entropy sources of the library. Same keys and values as `GetResult.components`. */
   components: Record<string, SerializedComponent>
   /** The extra signals that exist only in the collector (`src/collector/sources`) */
@@ -77,7 +89,7 @@ export function serializeComponents(components: UnknownComponents): Record<strin
 }
 
 export function makePayload(
-  parts: Pick<CollectPayload, 'components' | 'extended' | 'nonce' | 'linkedId'>,
+  parts: Pick<CollectPayload, 'components' | 'extended' | 'nonce' | 'linkedId' | 'consent'>,
   startedAt: number,
 ): CollectPayload {
   const payload: CollectPayload = {
@@ -93,6 +105,9 @@ export function makePayload(
   }
   if (parts.linkedId !== undefined) {
     payload.linkedId = parts.linkedId
+  }
+  if (parts.consent !== undefined) {
+    payload.consent = parts.consent
   }
   return payload
 }

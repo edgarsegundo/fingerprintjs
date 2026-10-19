@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, it } from 'node:test'
 
 import type { StoredEvent } from '../store/types'
 
 import { checkTamper } from './checks'
+import { tamperCheckIds } from './ids'
 
 const macUserAgent =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) ' +
@@ -73,6 +76,7 @@ function cleanEvent(): StoredEvent {
         workerContext: signal({
           page: snapshot(),
           worker: { ...snapshot(), webgl: { unmaskedRenderer: 'ANGLE (Apple M1)' } },
+          frame: snapshot(),
         }),
         nativeIntegrity: signal({ nonNative: [], missing: [], navigatorOwnProperties: [], screenOwnProperties: [] }),
         automationHints: signal({
@@ -99,6 +103,8 @@ function found(change: (event: StoredEvent) => void): string[] {
 const workerOf = (event: StoredEvent) =>
   (event.payload.extended.workerContext.value as { worker: Record<string, unknown>; page: Record<string, unknown> })
     .worker
+const frameOf = (event: StoredEvent) =>
+  (event.payload.extended.workerContext.value as { frame: Record<string, unknown> }).frame
 const pageOf = (event: StoredEvent) =>
   (event.payload.extended.workerContext.value as { worker: Record<string, unknown>; page: Record<string, unknown> })
     .page
@@ -180,6 +186,59 @@ describe('platform', () => {
 
   it('ignores a platform it cannot read', () => {
     assert.ok(!found((e) => (e.payload.components.platform = signal('Plan9'))).includes('platform_inconsistent'))
+  })
+})
+
+describe('page and iframe', () => {
+  it('finds nothing when the page and its iframe agree', () => {
+    assert.deepEqual(
+      found(() => undefined),
+      [],
+    )
+  })
+
+  it('flags a platform or a user agent that only the page changed, as medium', () => {
+    for (const field of ['platform', 'userAgent', 'hardwareConcurrency', 'deviceMemory']) {
+      const event = cleanEvent()
+      frameOf(event)[field] = field === 'hardwareConcurrency' || field === 'deviceMemory' ? 2 : 'Win32'
+      const signals = checkTamper(event).signals.filter((item) => item.id === 'iframe_page_mismatch')
+      assert.deepEqual(
+        signals.map((item) => [item.id, item.severity]),
+        [['iframe_page_mismatch', 'medium']],
+        field,
+      )
+      assert.ok(signals[0].detail.includes(field), field)
+    }
+  })
+
+  it('flags only a language or a time zone as low', () => {
+    const event = cleanEvent()
+    frameOf(event).timezone = 'Asia/Tokyo'
+    assert.deepEqual(
+      checkTamper(event)
+        .signals.filter((item) => item.id === 'iframe_page_mismatch')
+        .map((item) => item.severity),
+      ['low'],
+    )
+  })
+
+  it('says nothing when the iframe could not be read, or an older client did not send it', () => {
+    const blocked = cleanEvent()
+    ;(blocked.payload.extended.workerContext.value as { frame: unknown }).frame = { unavailable: 'Error' }
+    assert.ok(!checkTamper(blocked).signals.some((item) => item.id === 'iframe_page_mismatch'))
+    const older = cleanEvent()
+    delete (older.payload.extended.workerContext.value as { frame?: unknown }).frame
+    assert.ok(!checkTamper(older).signals.some((item) => item.id === 'iframe_page_mismatch'))
+    const odd = cleanEvent()
+    ;(odd.payload.extended.workerContext.value as { frame: unknown }).frame = 'text'
+    assert.ok(!checkTamper(odd).signals.some((item) => item.id === 'iframe_page_mismatch'))
+  })
+
+  it('ignores a field that one of the two views does not have', () => {
+    const event = cleanEvent()
+    delete frameOf(event).deviceMemory
+    delete pageOf(event).hardwareConcurrency
+    assert.ok(!checkTamper(event).signals.some((item) => item.id === 'iframe_page_mismatch'))
   })
 })
 
@@ -511,5 +570,58 @@ describe('report', () => {
     const event = cleanEvent()
     event.payload.components.platform = signal('Win32')
     assert.deepEqual(checkTamper(JSON.parse(JSON.stringify(event))), checkTamper(event))
+  })
+})
+
+describe('tuning the checks', () => {
+  const skewed = () => {
+    const event = cleanEvent()
+    event.derived.clockSkewMs = 10 * 60 * 1000
+    event.derived.nonceContext = 'mismatch'
+    return event
+  }
+
+  it('lists every id a check can emit in the registry used to validate settings', () => {
+    const source = readFileSync(join(__dirname, '..', '..', 'src', 'tamper', 'checks.ts'), 'utf8')
+    const emitted = [...new Set([...source.matchAll(/\bid: '([a-z_]+)'/g)].map((match) => match[1]))].filter(
+      (id) => id !== 'x',
+    )
+    assert.deepEqual(emitted.sort(), [...tamperCheckIds].sort())
+  })
+
+  it('leaves out the checks that were turned off, and only those', () => {
+    const all = checkTamper(skewed())
+    assert.deepEqual(all.signals.map((item) => item.id).sort(), ['clock_skew', 'nonce_context_mismatch'])
+    const result = checkTamper(skewed(), { disabledChecks: ['clock_skew'] })
+    assert.deepEqual(
+      result.signals.map((item) => item.id),
+      ['nonce_context_mismatch'],
+    )
+    assert.deepEqual(result.counts, { high: 0, medium: 1, low: 0 })
+  })
+
+  it('applies a severity chosen for one check without touching the others', () => {
+    const result = checkTamper(skewed(), { severity: { clock_skew: 'high' } })
+    assert.deepEqual(
+      result.signals.map((item) => [item.id, item.severity]),
+      [
+        ['clock_skew', 'high'],
+        ['nonce_context_mismatch', 'medium'],
+      ],
+    )
+    assert.deepEqual(result.counts, { high: 1, medium: 1, low: 0 })
+  })
+
+  it('reads the clock tolerance from the options, in seconds', () => {
+    const event = cleanEvent()
+    event.derived.clockSkewMs = 10 * 60 * 1000
+    assert.deepEqual(
+      checkTamper(event).signals.map((item) => item.id),
+      ['clock_skew'],
+    )
+    assert.deepEqual(checkTamper(event, { clockSkewSeconds: 601 }).signals, [])
+    assert.equal(checkTamper(event, { clockSkewSeconds: 599 }).signals.length, 1)
+    // The edge: exactly at the tolerance is still fine
+    assert.deepEqual(checkTamper(event, { clockSkewSeconds: 600 }).signals, [])
   })
 })

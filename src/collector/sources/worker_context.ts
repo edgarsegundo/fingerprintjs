@@ -1,5 +1,7 @@
 import { suppressUnhandledRejectionWarning } from '../../utils/async'
 import { isGecko } from '../../utils/browser'
+import { withIframe } from '../../utils/dom'
+import { withTimeout } from '../utils'
 
 const workerTimeoutMs = 2000
 
@@ -27,6 +29,11 @@ export type WorkerSnapshot = ContextSnapshot & {
 
 export type WorkerContext = {
   page: ContextSnapshot
+  /**
+   * The same values read in a hidden iframe of the same page, which has a `navigator` of its own. A tool that
+   * patches the top window only leaves the iframe telling the truth. `unavailable` says why it could not be read.
+   */
+  frame?: ContextSnapshot | { unavailable: string }
   /** Either the worker's view, or the reason why the worker couldn't run (a CSP block is a legitimate reason) */
   worker: WorkerSnapshot | { unavailable: string }
 }
@@ -86,8 +93,8 @@ self.onmessage = function (event) {
 }
 `
 
-export function getPageSnapshot(): ContextSnapshot {
-  const n = navigator
+export function getPageSnapshot(win: Window = window): ContextSnapshot {
+  const n = win.navigator
   const snapshot: ContextSnapshot = {
     userAgent: n.userAgent,
     platform: n.platform,
@@ -98,7 +105,7 @@ export function getPageSnapshot(): ContextSnapshot {
   }
 
   try {
-    const options = Intl.DateTimeFormat().resolvedOptions()
+    const options = (win as Window & typeof globalThis).Intl.DateTimeFormat().resolvedOptions()
     snapshot.timezone = options.timeZone
     snapshot.locale = options.locale
   } catch {
@@ -119,6 +126,20 @@ export function getPageSnapshot(): ContextSnapshot {
   }
 
   return snapshot
+}
+
+const frameTimeoutMs = 1500
+
+/** The values as a fresh iframe sees them, or why they could not be read (a policy may refuse frames) */
+async function getFrameSnapshot(): Promise<NonNullable<WorkerContext['frame']>> {
+  try {
+    return await withTimeout(
+      withIframe((_iframe, iWindow) => getPageSnapshot(iWindow as unknown as Window)),
+      frameTimeoutMs,
+    )
+  } catch (error) {
+    return { unavailable: error instanceof Error && error.name ? error.name : 'Error' }
+  }
 }
 
 function runWorker(): Promise<WorkerSnapshot> {
@@ -167,5 +188,8 @@ export default function getWorkerContext(): undefined | (() => Promise<WorkerCon
     ),
   )
 
-  return async () => ({ page: getPageSnapshot(), worker: await workerPromise })
+  // The iframe, like the worker, starts in the "load" phase and runs in parallel with the other sources
+  const framePromise = suppressUnhandledRejectionWarning(getFrameSnapshot())
+
+  return async () => ({ page: getPageSnapshot(), worker: await workerPromise, frame: await framePromise })
 }

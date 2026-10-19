@@ -1,6 +1,6 @@
 # Roteiro
 
-Atualizado em 2026-10-17. Status possíveis: pendente, em andamento, concluída, concluída com ressalvas.
+Atualizado em 2026-10-19. Status possíveis: pendente, em andamento, concluída, concluída com ressalvas.
 
 ## Meta e honestidade
 
@@ -8,25 +8,31 @@ Chegar a uma plataforma de identificação de visitantes equivalente ao Fingerpr
 e superior em dimensões **mensuráveis**: transparência, explicabilidade, privacidade por design, custo, adaptação a mudanças
 de navegador, benchmark aberto. Nada é "melhor que o Pro" sem dizer como se mediu. Quase todas as fontes sobre o Pro vêm
 da própria empresa. Os números do produto pago (99,5%, 1 bilhão de dispositivos por mês) são alegação do fornecedor.
-O 99,5% cobre só falsos positivos, não falsos negativos.
+A página técnica de precisão do fornecedor não diz a que taxa o 99,5% se refere nem sobre qual conjunto de dados (ver `01-pesquisa-e-fontes.md`, A1).
+
+## Fechamento
+
+Veja [06-fechamento-e-autocritica.md](06-fechamento-e-autocritica.md): verificação final, autocrítica, suposições e as perguntas que mudam o plano.
 
 ## Status das fases
 
 | Fase | Conteúdo | Status | Relatório |
 |---|---|---|---|
-| Pesquisa (Etapas 1 a 3 do pedido) | Fontes, inventário completo, 20 ideias inovadoras | **pendente** (não escrita) | |
+| Pesquisa (Etapas 1 a 3 do pedido) | Fontes, inventário completo, 22 ideias e 5 experimentos, riscos e conformidade | escrita; **pesquisa mais rasa que o pedido** (cerca de 30 buscas, uma página lida por inteiro) | [01](01-pesquisa-e-fontes.md), [02](02-inventario-de-capacidades.md), [03](03-ideias-inovadoras.md), [05](05-riscos-privacidade-e-compliance.md) |
 | 0 | Fundação: harness de avaliação, dataset ético, linha de base da v5 | código concluído; **dados reais pendentes** (pré-requisito de qualquer número) | [fase-0](fases/fase-0-harness.md) |
 | 1 | Coleta ampliada no cliente + coletor de sinais crus | concluída com ressalvas | [fase-1](fases/fase-1-coleta-ampliada.md) |
 | 2 | Servidor de ingestão e sinais de rede (JA4, cabeçalhos, HTTP/2, IP) | concluída com ressalvas | [fase-2](fases/fase-2-ingestao.md) |
 | 3 | Motor de matching e confidence score | código concluído; **parâmetros provisórios, sem dados reais** | [fase-3](fases/fase-3-matching.md) |
 | 4 | Anti-adulteração e anti-replay (resultado selado) | código concluído; **contra navegadores anti-detecção profissionais não testado**; resultado selado não implementado (D38) | [fase-4](fases/fase-4-anti-adulteracao.md) |
-| 5 | Smart Signals (bot, VPN, automação, consistência) | pendente | |
-| 6 | SDKs, API de eventos, webhooks, painel, proxy de primeira parte | pendente | |
-| 7 | Privacidade, LGPD e governança | pendente (o essencial entra antes, ver abaixo) | |
-| 8 | Escala, observabilidade, segurança e hardening | pendente | |
-| 9 | Diferenciais inovadores | pendente | |
-| SaaS | Multi-tenant isolado: faturamento, onboarding, painel por cliente, DPA, SLA | pendente | |
-| Grafo | Grafo compartilhado entre clientes (D3) | pendente, com trava jurídica | |
+| Config | Tudo configurável: tabela de parâmetros, camadas por tenant, recarga por `SIGHUP`, referência gerada (D41 a D45) | concluída; tamper e identidade já consomem os parâmetros | [configuracao](../configuracao.md) |
+| 5 | Smart Signals (listas de IP, país, velocidade, risco composto, regras, comportamento opt-in) | código concluído; **pesos são palpites** | [fase-5](fases/fase-5-smart-signals.md) |
+| 6 | SDK de Node, API de consulta, webhooks, painel, integração de primeira parte | código concluído | [fase-6](fases/fase-6-api-e-integracao.md) |
+| 7 | Privacidade, LGPD e governança | código concluído; **textos jurídicos são modelos sem revisão** (adiada para o fim) | [fase-7](fases/fase-7-privacidade.md) |
+| 8 | Escala, observabilidade, segurança e hardening; MySQL como banco de produção (D79 a D82) | código concluído; **medidas de carga de um notebook** | [fase-8](fases/fase-8-escala-e-operacao.md) |
+| 9 | Diferenciais inovadores (deriva, coleta guiada, k-anonimato) | código concluído; **sem dados reais** | [fase-9](fases/fase-9-diferenciais-e-grafo.md) |
+| SaaS | Multi-tenant isolado: tenants dinâmicos, planos, uso, cotas | código concluído; **sem faturamento, painel de cliente, DPA ou SLA** | [saas](fases/fase-saas-multitenant.md) |
+| 10 | O que dava para fazer sem dados: juntar e separar aparelhos, robôs por DNS, código guardado, ambiente, vários servidores, busca em escala, listas de IP com colunas, migração para MySQL | código concluído; **sem número de precisão**; código guardado precisa de parecer | [fase-10](fases/fase-10-sem-dados.md) |
+| Grafo | Grafo compartilhado entre clientes (D3) | mecanismo pronto, **desligado e travado**; sem parecer não liga | [grafo](privacidade/grafo-compartilhado.md) |
 
 Ordem do uso próprio ao SaaS: 0, 1, 2, 3, 4, 5, 6, 7, SaaS, 8, Grafo, 9. A Fase 0 deveria vir antes da 3, porque o
 motor de matching não se calibra sem dados rotulados. A Fase 7 não pode esperar até o fim: retenção, `tenant_id` e

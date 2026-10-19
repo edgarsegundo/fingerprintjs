@@ -17,6 +17,7 @@ export interface CollectPayload {
   durationMs: number
   nonce?: string
   linkedId?: string
+  consent?: { basis: 'consent' | 'legitimate_interest' | 'contract' | 'other'; version: string }
   components: Record<string, SerializedSignal>
   extended: Record<string, SerializedSignal>
 }
@@ -24,6 +25,8 @@ export interface CollectPayload {
 const maxSignalsPerGroup = 200
 const maxProblems = 20
 const linkedIdPattern = /^[A-Za-z0-9_.:-]{1,128}$/
+const consentVersionPattern = /^[A-Za-z0-9_.:-]{1,64}$/
+const consentBases = ['consent', 'legitimate_interest', 'contract', 'other']
 const signalNamePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
 /** Names that would change the prototype of a plain object if some code later wrote them as a property */
 const forbiddenNames = new Set(['__proto__', 'constructor', 'prototype'])
@@ -105,6 +108,20 @@ export function validatePayload(input: unknown): Result {
   }
   if ('linkedId' in input && (typeof input.linkedId !== 'string' || !linkedIdPattern.test(input.linkedId))) {
     problems.push('linkedId must be 1 to 128 characters of letters, digits and _ - . :')
+  }
+  if ('consent' in input) {
+    const consent = input.consent
+    if (
+      !isPlainObject(consent) ||
+      Object.keys(consent).some((key) => key !== 'basis' && key !== 'version') ||
+      !consentBases.includes(consent.basis as string) ||
+      typeof consent.version !== 'string' ||
+      !consentVersionPattern.test(consent.version)
+    ) {
+      problems.push(
+        'consent must be { basis: consent|legitimate_interest|contract|other, version: text of 1 to 64 characters }',
+      )
+    }
   }
   validateGroup('components', input.components, problems)
   validateGroup('extended', input.extended, problems)

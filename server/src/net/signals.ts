@@ -5,6 +5,7 @@ import type { TLSSocket } from 'node:tls'
 import { Config } from '../config'
 import { ConnectionRegistry } from '../tls/tls_front'
 
+import type { Crawler } from './bots'
 import { Cidr, ipPrefix, isInAny, normalizeIp, parseIp } from './cidr'
 import { resolveClientIp } from './client_ip'
 import { HeaderSignals, headerSignals } from './headers'
@@ -27,6 +28,8 @@ export interface TlsSignals {
 }
 
 export interface NetworkSignals {
+  /** Set when the user agent claims to be a known search crawler: whether the address really is one of its own */
+  crawler?: Crawler
   ip: string
   ipVersion: 4 | 6
   /** /24 of an IPv4 address and /64 of an IPv6 address */

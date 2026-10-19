@@ -23,7 +23,17 @@ export interface TamperReport {
   counts: Record<Severity, number>
 }
 
-type Check = (event: StoredEvent) => TamperSignal | undefined
+/** What can be tuned per tenant. Every field is optional and the defaults are the ones of the settings. */
+export interface TamperOptions {
+  /** Checks that are not run: their signals never appear */
+  disabledChecks?: readonly string[]
+  /** Replaces the severity of a check. The severity of the built-in table is a judgement, and a tenant may differ. */
+  severity?: Readonly<Record<string, Severity>>
+  /** A browser clock further than this from the server's is reported, in seconds */
+  clockSkewSeconds?: number
+}
+
+type Check = (event: StoredEvent, options: { clockSkewSeconds: number }) => TamperSignal | undefined
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -51,15 +61,19 @@ interface Snapshot {
   webgl?: unknown
 }
 
-/** The two views of `navigator` that the collector took: the page's and the worker's (`undefined` if it did not run) */
-function views(event: StoredEvent): { page?: Snapshot; worker?: Snapshot } {
+/**
+ * The views of `navigator` that the collector took: the page's, the worker's and a hidden iframe's (each `undefined` if
+ * it did not run or could not be read).
+ */
+function views(event: StoredEvent): { page?: Snapshot; worker?: Snapshot; frame?: Snapshot } {
   const value = extended(event, 'workerContext')
   if (!isObject(value)) {
     return {}
   }
   const page = isObject(value.page) ? (value.page as Snapshot) : undefined
   const worker = isObject(value.worker) && !('unavailable' in value.worker) ? (value.worker as Snapshot) : undefined
-  return { page, worker }
+  const frame = isObject(value.frame) && !('unavailable' in value.frame) ? (value.frame as Snapshot) : undefined
+  return { page, worker, frame }
 }
 
 const headerValue = (event: StoredEvent, name: string): string | undefined => event.network.headers.values[name]
@@ -155,6 +169,33 @@ const workerPageMismatch: Check = (event) => {
     id: 'worker_page_mismatch',
     severity: high.length > 0 ? 'high' : 'medium',
     detail: `The page and a worker disagree on: ${[...high, ...medium].join(', ')}.`,
+  }
+}
+
+/**
+ * A hidden iframe of the same page has a `navigator` of its own. A tool that changes the one of the top window by
+ * script leaves the iframe's telling the truth, and a tool that works at the browser level (a debugger, a setting of
+ * the browser) changes both. So this finds the clumsier tool, and finding nothing says little. It is medium evidence,
+ * not high, because an extension that injects into frames may touch them differently.
+ */
+const iframePageMismatch: Check = (event) => {
+  const { page, frame } = views(event)
+  if (!page || !frame) {
+    return undefined
+  }
+  const fields = [...highFields, 'userAgent' as const].filter(
+    (field) => page[field] !== undefined && frame[field] !== undefined && !sameJson(page[field], frame[field]),
+  )
+  const soft = mediumFields.filter(
+    (field) => page[field] !== undefined && frame[field] !== undefined && !sameJson(page[field], frame[field]),
+  )
+  if (fields.length === 0 && soft.length === 0) {
+    return undefined
+  }
+  return {
+    id: 'iframe_page_mismatch',
+    severity: fields.length > 0 ? 'medium' : 'low',
+    detail: `The page and a frame of the same page disagree on: ${[...fields, ...soft].join(', ')}.`,
   }
 }
 
@@ -377,10 +418,8 @@ const impossibleValues: Check = (event) => {
       }
 }
 
-const fiveMinutes = 5 * 60 * 1000
-
-const clockSkew: Check = (event) =>
-  Math.abs(event.derived.clockSkewMs) > fiveMinutes
+const clockSkew: Check = (event, options) =>
+  Math.abs(event.derived.clockSkewMs) > options.clockSkewSeconds * 1000
     ? {
         id: 'clock_skew',
         severity: 'low',
@@ -403,6 +442,7 @@ const checks: Check[] = [
   userAgentInconsistent,
   platformInconsistent,
   workerPageMismatch,
+  iframePageMismatch,
   webglWorkerMismatch,
   gpuPlatformInconsistent,
   clientHintsBrandsMismatch,
@@ -425,13 +465,15 @@ const order: Record<Severity, number> = { high: 0, medium: 1, low: 2 }
  * remote desktops, travel) trigger the weaker signals. A check that fails on a strange value is skipped, since the
  * payload comes from the client and anything can be in it.
  */
-export function checkTamper(event: StoredEvent): TamperReport {
+export function checkTamper(event: StoredEvent, options: TamperOptions = {}): TamperReport {
+  const disabled = new Set(options.disabledChecks ?? [])
+  const resolved = { clockSkewSeconds: options.clockSkewSeconds ?? 300 }
   const signals: TamperSignal[] = []
   for (const check of checks) {
     try {
-      const signal = check(event)
-      if (signal) {
-        signals.push(signal)
+      const signal = check(event, resolved)
+      if (signal && !disabled.has(signal.id)) {
+        signals.push({ ...signal, severity: options.severity?.[signal.id] ?? signal.severity })
       }
     } catch {
       // A malformed value must not hide the other findings

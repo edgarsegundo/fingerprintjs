@@ -39,11 +39,11 @@ export class SqliteEventStore implements EventStore {
   }
   private readonly insert: StatementSync
   private readonly select: StatementSync
-  private readonly list: StatementSync
   private readonly deleteLinked: StatementSync
   private readonly insertNonce: StatementSync
-  private readonly deleteEvents: StatementSync
+  private readonly deleteOld: StatementSync
   private readonly deleteNonces: StatementSync
+  private readonly deleteTenantEvents: StatementSync
 
   constructor(path: string) {
     this.db = new DatabaseSync(path)
@@ -77,23 +77,22 @@ export class SqliteEventStore implements EventStore {
       this.db.exec('ALTER TABLE events ADD COLUMN linked_id TEXT')
     }
     this.db.exec('CREATE INDEX IF NOT EXISTS events_tenant_linked ON events (tenant_id, linked_id)')
+    this.db.exec('CREATE INDEX IF NOT EXISTS events_tenant_ip ON events (tenant_id, ip, received_at)')
     this.insert = this.db.prepare(
       `INSERT INTO events
          (request_id, tenant_id, received_at, ip, ja4, header_fp, linked_id, payload_json, network_json, derived_json)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     this.deleteLinked = this.db.prepare('DELETE FROM events WHERE tenant_id = ? AND linked_id = ?')
-    this.list = this.db.prepare(
-      `SELECT * FROM events
-       WHERE tenant_id = ? AND received_at >= ? AND received_at < ?
-         AND (received_at > ? OR (received_at = ? AND request_id > ?))
-       ORDER BY received_at, request_id
-       LIMIT ?`,
-    )
     this.select = this.db.prepare('SELECT * FROM events WHERE tenant_id = ? AND request_id = ?')
     this.insertNonce = this.db.prepare('INSERT OR IGNORE INTO used_nonces (fingerprint, expires_at) VALUES (?, ?)')
-    this.deleteEvents = this.db.prepare('DELETE FROM events WHERE received_at < ?')
+    this.deleteOld = this.db.prepare('DELETE FROM events WHERE received_at < ?')
     this.deleteNonces = this.db.prepare('DELETE FROM used_nonces WHERE expires_at < ?')
+    this.deleteTenantEvents = this.db.prepare('DELETE FROM events WHERE tenant_id = ? AND received_at < ?')
+  }
+
+  ping(): void {
+    this.db.prepare('SELECT 1').get()
   }
 
   insertEvent(event: StoredEvent): void {
@@ -117,17 +116,47 @@ export class SqliteEventStore implements EventStore {
   }
 
   listEvents(tenantId: string, options: ListOptions): StoredEvent[] {
-    const { since = 0, until = Number.MAX_SAFE_INTEGER, after, limit } = options
-    const rows = this.list.all(
-      tenantId,
-      since,
-      until,
-      after?.receivedAt ?? -1,
-      after?.receivedAt ?? -1,
-      after?.requestId ?? '',
-      limit,
-    ) as unknown as EventRow[]
+    const { since = 0, until = Number.MAX_SAFE_INTEGER, after, limit, linkedId, ip, newestFirst = false } = options
+    const where = ['tenant_id = ?', 'received_at >= ?', 'received_at < ?']
+    const values: Array<string | number> = [tenantId, since, until]
+    if (linkedId !== undefined) {
+      where.push('linked_id = ?')
+      values.push(linkedId)
+    }
+    if (ip !== undefined) {
+      where.push('ip = ?')
+      values.push(ip)
+    }
+    if (after) {
+      const [earlier, later] = newestFirst ? ['<', '<'] : ['>', '>']
+      where.push(`(received_at ${earlier} ? OR (received_at = ? AND request_id ${later} ?))`)
+      values.push(after.receivedAt, after.receivedAt, after.requestId)
+    }
+    const direction = newestFirst ? 'DESC' : 'ASC'
+    // The conditions are fixed text; every value goes in as a parameter
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM events WHERE ${where.join(' AND ')}
+         ORDER BY received_at ${direction}, request_id ${direction} LIMIT ?`,
+      )
+      .all(...values, limit) as unknown as EventRow[]
     return rows.map(toEvent)
+  }
+
+  deleteEvents(tenantId: string, requestIds: readonly string[]): number {
+    let deleted = 0
+    this.db.exec('BEGIN')
+    try {
+      const statement = this.db.prepare('DELETE FROM events WHERE tenant_id = ? AND request_id = ?')
+      for (const id of requestIds) {
+        deleted += Number(statement.run(tenantId, id).changes)
+      }
+      this.db.exec('COMMIT')
+    } catch (error) {
+      this.db.exec('ROLLBACK')
+      throw error
+    }
+    return deleted
   }
 
   deleteByLinkedId(tenantId: string, linkedId: string): number {
@@ -138,9 +167,17 @@ export class SqliteEventStore implements EventStore {
     return Number(this.insertNonce.run(fingerprint, expiresAt).changes) === 1
   }
 
+  purgeTenant(tenantId: string, nowMs: number, retentionMs: number): number {
+    return Number(this.deleteTenantEvents.run(tenantId, nowMs - retentionMs).changes)
+  }
+
+  purgeNonces(nowMs: number): number {
+    return Number(this.deleteNonces.run(nowMs).changes)
+  }
+
   purge(nowMs: number, retentionMs: number): { events: number; nonces: number } {
     return {
-      events: Number(this.deleteEvents.run(nowMs - retentionMs).changes),
+      events: Number(this.deleteOld.run(nowMs - retentionMs).changes),
       nonces: Number(this.deleteNonces.run(nowMs).changes),
     }
   }

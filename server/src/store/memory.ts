@@ -5,6 +5,10 @@ export class MemoryEventStore implements EventStore {
   private readonly events = new Map<string, StoredEvent>()
   private readonly nonces = new Map<string, number>()
 
+  ping(): void {
+    // Memory is always there
+  }
+
   insertEvent(event: StoredEvent): void {
     if (this.events.has(event.requestId)) {
       throw new Error('duplicate requestId')
@@ -19,20 +23,43 @@ export class MemoryEventStore implements EventStore {
   }
 
   listEvents(tenantId: string, options: ListOptions): StoredEvent[] {
-    const { since = 0, until = Number.MAX_SAFE_INTEGER, after, limit } = options
+    const { since = 0, until = Number.MAX_SAFE_INTEGER, after, limit, linkedId, ip, newestFirst = false } = options
+    const sign = newestFirst ? -1 : 1
     return [...this.events.values()]
-      .filter((event) => event.tenantId === tenantId && event.receivedAt >= since && event.receivedAt < until)
+      .filter(
+        (event) =>
+          event.tenantId === tenantId &&
+          event.receivedAt >= since &&
+          event.receivedAt < until &&
+          (linkedId === undefined || event.payload.linkedId === linkedId) &&
+          (ip === undefined || event.network.ip === ip),
+      )
       .sort(
-        (a, b) => a.receivedAt - b.receivedAt || (a.requestId < b.requestId ? -1 : a.requestId > b.requestId ? 1 : 0),
+        (a, b) =>
+          sign * (a.receivedAt - b.receivedAt) ||
+          sign * (a.requestId < b.requestId ? -1 : a.requestId > b.requestId ? 1 : 0),
       )
       .filter(
         (event) =>
           !after ||
-          event.receivedAt > after.receivedAt ||
-          (event.receivedAt === after.receivedAt && event.requestId > after.requestId),
+          sign * event.receivedAt > sign * after.receivedAt ||
+          (event.receivedAt === after.receivedAt &&
+            event.requestId !== after.requestId &&
+            sign * (event.requestId > after.requestId ? 1 : -1) > 0),
       )
       .slice(0, limit)
       .map((event) => structuredClone(event))
+  }
+
+  deleteEvents(tenantId: string, requestIds: readonly string[]): number {
+    let deleted = 0
+    for (const id of requestIds) {
+      if (this.events.get(id)?.tenantId === tenantId) {
+        this.events.delete(id)
+        deleted++
+      }
+    }
+    return deleted
   }
 
   deleteByLinkedId(tenantId: string, linkedId: string): number {
@@ -52,6 +79,28 @@ export class MemoryEventStore implements EventStore {
     }
     this.nonces.set(fingerprint, expiresAt)
     return true
+  }
+
+  purgeTenant(tenantId: string, nowMs: number, retentionMs: number): number {
+    let deleted = 0
+    for (const [id, event] of this.events) {
+      if (event.tenantId === tenantId && event.receivedAt < nowMs - retentionMs) {
+        this.events.delete(id)
+        deleted++
+      }
+    }
+    return deleted
+  }
+
+  purgeNonces(nowMs: number): number {
+    let deleted = 0
+    for (const [fingerprint, expiresAt] of this.nonces) {
+      if (expiresAt < nowMs) {
+        this.nonces.delete(fingerprint)
+        deleted++
+      }
+    }
+    return deleted
   }
 
   purge(nowMs: number, retentionMs: number): { events: number; nonces: number } {

@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Local test of the collector</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; }
+  button { font: inherit; padding: 0.5rem 1rem; }
+  pre { background: #f3f3f3; padding: 1rem; overflow: auto; }
+</style>
+<h1>Local test</h1>
+<p>Each click sends one visit to the server on port 8080 and shows the <code>requestId</code> it answers with.</p>
+<label><input id="stored" type="checkbox" /> Use the code stored in the browser (needs the tenant to turn it on, which the setup does)</label>
+<p><button id="send" type="button">Send a visit</button></p>
+<pre id="out">Waiting.</pre>
+<script src="../../dist/fp.min.js"></script>
+<script>
+  var api = 'http://127.0.0.1:8080'
+  var key = new URLSearchParams(location.search).get('k')
+  var out = document.getElementById('out')
+  var count = 0
+
+  document.getElementById('send').addEventListener('click', async function () {
+    if (!key) {
+      out.textContent = 'Open this page with ?k=<public key>. The setup prints the full address.'
+      return
+    }
+    out.textContent = 'Sending...'
+    try {
+      var challenge = await (await fetch(api + '/v1/nonce?k=' + key)).json()
+      var options = { nonce: challenge.nonce, linkedId: 'teste' }
+      if (document.getElementById('stored').checked) {
+        options.include = ['storedId']
+        options.consent = { basis: 'legitimate_interest', version: 'local-test' }
+      }
+      var result = await FingerprintJS.collectAndSend({ endpoint: api + '/v1/collect?k=' + key, credentials: 'include' }, options)
+      count++
+      out.textContent = 'Visit ' + count + ' sent.\nrequestId: ' + result.requestId
+    } catch (error) {
+      out.textContent = 'Failed: ' + error
+    }
+  })
+</script>

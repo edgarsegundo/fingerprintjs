@@ -1,4 +1,4 @@
-import { Volatility, volatilityOf } from './features'
+import { isIdentifier, Volatility, volatilityOf } from './features'
 
 /**
  * The scoring model is a Fellegi-Sunter model from record linkage: each feature that both the visit and a known device
@@ -19,6 +19,12 @@ export interface Model {
   /** Per feature: the chance that a device keeps a value. Missing features use `defaultM`. */
   m: Record<string, number>
   defaultM: Record<Volatility, number>
+  /** Per feature: overrides how volatile the feature is, which decides how much a disagreement weighs */
+  volatility?: Record<string, Volatility>
+  /** The most that one feature can add in favour of a device, in log-odds */
+  maxWeight: number
+  /** The most that a disagreement can weigh against a device, by volatility. Keeps one change from vetoing a match. */
+  disagreementFloor: Record<Volatility, number>
   /** A visit is attached to a known device when its probability reaches this */
   matchProbability: number
   /** Turns the sum of evidence (log-odds) into a probability. Fitted on labelled data; a cautious guess before that. */
@@ -33,7 +39,9 @@ export function defaultModel(): Model {
     version: 1,
     m: {},
     defaultM: { stable: 0.98, semi: 0.9, volatile: 0.5 },
-    matchProbability: 0.95,
+    maxWeight: 12,
+    disagreementFloor: { stable: -6, semi: -3, volatile: -1.5 },
+    matchProbability: 0.99,
     // Scaling by less than one because the features are not independent (the GPU, the canvas and the WebGL extensions
     // all follow from the hardware), so the sum of evidence overstates how sure we are. The number is a placeholder:
     // it was picked so that an identical visit is recognized even when very few devices are known. Only `fit-model`
@@ -78,6 +86,37 @@ export function parseModel(input: unknown): Model {
       }
     }
   }
+  const volatility: Record<string, Volatility> = {}
+  if (input.volatility !== undefined) {
+    if (!isRecord(input.volatility)) {
+      throw new Error('Model: volatility must be an object')
+    }
+    for (const [feature, level] of Object.entries(input.volatility)) {
+      if (level !== 'stable' && level !== 'semi' && level !== 'volatile') {
+        throw new Error(`Model: volatility.${feature} must be stable, semi or volatile`)
+      }
+      volatility[feature] = level
+    }
+  }
+  const maxWeight = input.maxWeight === undefined ? base.maxWeight : input.maxWeight
+  if (typeof maxWeight !== 'number' || !(maxWeight >= 1 && maxWeight <= 100)) {
+    throw new Error('Model: maxWeight must be a number from 1 to 100')
+  }
+  const disagreementFloor = { ...base.disagreementFloor }
+  if (input.disagreementFloor !== undefined) {
+    if (!isRecord(input.disagreementFloor)) {
+      throw new Error('Model: disagreementFloor must be an object')
+    }
+    for (const key of ['stable', 'semi', 'volatile'] as const) {
+      const value = input.disagreementFloor[key]
+      if (value !== undefined) {
+        if (typeof value !== 'number' || !(value >= -50 && value <= 0)) {
+          throw new Error(`Model: disagreementFloor.${key} must be a number from -50 to 0`)
+        }
+        disagreementFloor[key] = value
+      }
+    }
+  }
   let platt = base.platt
   if (input.platt !== undefined) {
     if (
@@ -94,6 +133,9 @@ export function parseModel(input: unknown): Model {
     version: 1,
     m,
     defaultM,
+    ...(Object.keys(volatility).length > 0 ? { volatility } : {}),
+    maxWeight,
+    disagreementFloor,
     matchProbability:
       input.matchProbability === undefined
         ? base.matchProbability
@@ -104,8 +146,13 @@ export function parseModel(input: unknown): Model {
   }
 }
 
+/** How volatile a feature is: the model's override if it has one, otherwise the built-in classification */
+export function volatilityFor(model: Model, feature: string): Volatility {
+  return model.volatility?.[feature] ?? volatilityOf(feature)
+}
+
 export function mFor(model: Model, feature: string): number {
-  return model.m[feature] ?? model.defaultM[volatilityOf(feature)]
+  return model.m[feature] ?? model.defaultM[volatilityFor(model, feature)]
 }
 
 /** What the matcher needs to know about the devices it already knows, for one tenant */
@@ -121,11 +168,7 @@ export interface PopulationStats {
   agreementProbability(feature: string): number
 }
 
-const maxWeight = 12
-/** The lowest a disagreement may weigh. A volatile feature may change a lot without that meaning anything. */
-const disagreementFloor: Record<Volatility, number> = { stable: -6, semi: -3, volatile: -1.5 }
-
-export function agreementWeight(m: number, devices: number, devicesWithValue: number): number {
+export function agreementWeight(m: number, devices: number, devicesWithValue: number, maxWeight = 12): number {
   // The candidate itself has the value, so it is left out of the count of "other" devices. One is added to both
   // counts so that a value nobody else has still has a finite weight.
   const others = Math.max(0, devicesWithValue - 1)
@@ -135,16 +178,29 @@ export function agreementWeight(m: number, devices: number, devicesWithValue: nu
   return Math.min(maxWeight, Math.max(0, Math.log(m / u)))
 }
 
-export function disagreementWeight(m: number, agreementProbability: number, volatility: Volatility): number {
+/**
+ * @param floor the lowest a disagreement may weigh. A volatile feature may change a lot without that meaning anything,
+ * so its floor is closer to zero.
+ */
+export function disagreementWeight(m: number, agreementProbability: number, floor = -6): number {
   const u = Math.min(agreementProbability, 0.999)
   // A disagreement is never evidence for the same device, whatever the estimates say
-  return Math.min(0, Math.max(disagreementFloor[volatility], Math.log((1 - m) / (1 - u))))
+  return Math.min(0, Math.max(floor, Math.log((1 - m) / (1 - u))))
 }
 
 /**
  * Smoothed chance that two random devices agree, from how many devices have each value.
  * (Pairs that agree + 1) / (pairs + 2): one made-up agreeing pair and one made-up disagreeing pair.
  */
+/**
+ * The same estimate from two running totals: how many (device, value) pairs there are, and how many pairs of devices
+ * share a value. It is what a store that keeps counters uses, so that it does not have to count again at every visit.
+ */
+export function smoothedAgreementFromTotals(total: number, agreeingPairs: number): number {
+  const pairs = (total * (total - 1)) / 2
+  return (agreeingPairs + 1) / (pairs + 2)
+}
+
 export function smoothedAgreement(devicesPerValue: Iterable<number>): number {
   let total = 0
   let agreeingPairs = 0
@@ -190,13 +246,20 @@ export function scoreCandidate(
       contributions.push({
         feature,
         outcome: 'agree',
-        weight: agreementWeight(m, population.devices, population.devicesWithValue(feature, value)),
+        // A code made up for one device cannot be shared with another by chance, so it is worth the most there is
+        weight: isIdentifier(feature)
+          ? model.maxWeight
+          : agreementWeight(m, population.devices, population.devicesWithValue(feature, value), model.maxWeight),
       })
     } else {
       contributions.push({
         feature,
         outcome: 'disagree',
-        weight: disagreementWeight(m, population.agreementProbability(feature), volatilityOf(feature)),
+        weight: disagreementWeight(
+          m,
+          population.agreementProbability(feature),
+          model.disagreementFloor[volatilityFor(model, feature)],
+        ),
       })
     }
   }

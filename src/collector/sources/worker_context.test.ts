@@ -43,6 +43,39 @@ describe('Collector sources', () => {
       }
     }, 10000)
 
+    it('reads the same values in a hidden iframe, and leaves no iframe behind', async () => {
+      const before = document.querySelectorAll('iframe').length
+      const { page, frame } = await getContext()
+      expect(document.querySelectorAll('iframe').length).toBe(before)
+      if (!frame || 'unavailable' in frame) {
+        fail(`The iframe is unavailable: ${JSON.stringify(frame)}`)
+        return
+      }
+      for (const key of Object.keys(page) as Array<keyof typeof page>) {
+        expect(frame[key]).withContext(key).toEqual(page[key])
+      }
+    }, 10000)
+
+    it('exposes a page that was patched on its own, because the iframe has a navigator of its own', async () => {
+      const original = defined(Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform'))
+      Object.defineProperty(Navigator.prototype, 'platform', { ...original, get: () => 'SpoofedOS' })
+      try {
+        const { page, frame } = await getContext()
+        expect(page.platform).toBe('SpoofedOS')
+        expect(frame && 'unavailable' in frame).toBe(false)
+        expect((frame as { platform: string }).platform).not.toBe('SpoofedOS')
+      } finally {
+        Object.defineProperty(Navigator.prototype, 'platform', original)
+      }
+    }, 10000)
+
+    it('reports that the iframe is unavailable instead of failing', async () => {
+      spyOn(document.body, 'appendChild').and.throwError('blocked by a policy')
+      const { page, frame } = await getContext()
+      expect(page.userAgent).toBe(navigator.userAgent)
+      expect(frame).toEqual({ unavailable: 'Error' })
+    }, 10000)
+
     it('stops the worker after it answers', async () => {
       const terminate = spyOn(Worker.prototype, 'terminate').and.callThrough()
       await getContext()

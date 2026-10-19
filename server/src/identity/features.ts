@@ -30,6 +30,11 @@ export type Features = Record<string, string>
 
 interface FeatureSpec {
   volatility: Volatility
+  /**
+   * True for a value that is made up for one device and shared with no other, such as the random code that the page
+   * stores in the browser. Agreeing on it is worth the most that a feature can be worth, whatever the population says.
+   */
+  identifier?: boolean
   extract(input: FeatureInput): string | undefined
 }
 
@@ -220,11 +225,26 @@ export const featureSpecs: Record<string, FeatureSpec> = {
     volatility: 'semi',
     extract: (input) => (input.network.viaProxy ? undefined : input.network.http2Fp),
   },
+  // The random code the page keeps in the browser (cookie, local storage, IndexedDB). Clearing the site data loses it,
+  // so a different or missing code is weak evidence, and the same code is the strongest there is.
+  storedId: {
+    volatility: 'volatile',
+    identifier: true,
+    extract: (input) => {
+      const token = asObject(extended(input, 'storedId'))?.token
+      return typeof token === 'string' && /^[A-Za-z0-9_-]{22,64}$/.test(token) ? digest(token) : undefined
+    },
+  },
   ipPrefix: { volatility: 'volatile', extract: (input) => input.network.ipPrefix },
   ip: { volatility: 'volatile', extract: (input) => input.network.ip },
 }
 
 export const featureNames = Object.keys(featureSpecs)
+
+/** Whether the feature is a code made up for one device (see `FeatureSpec.identifier`) */
+export function isIdentifier(feature: string): boolean {
+  return featureSpecs[feature]?.identifier === true
+}
 
 export function volatilityOf(feature: string): Volatility {
   return featureSpecs[feature]?.volatility ?? 'volatile'

@@ -1,14 +1,27 @@
 import { readFileSync } from 'node:fs'
 
 import { Cidr, parseCidr, RangeSet } from './cidr'
+import { parseRangeFile, RangeFileFormat } from './ip_lists'
 
 export interface IpIntel {
   /** Labels of the lists the address is in, such as `datacenter` or `tor_exit` */
   tags: string[]
+  /** Two-letter country of the address, when a geolocation file is configured. Wrong often enough to be only a hint. */
+  country?: string
 }
 
 export interface IpIntelProvider {
   lookup(ip: string): IpIntel
+}
+
+/**
+ * A file that labels addresses. By default each line is a CIDR (or one address). With `ranges`, each line is a row of
+ * comma separated values with the first and last address of a range, in the columns named there.
+ */
+export interface IpListFile {
+  tag: string
+  file: string
+  ranges?: RangeFileFormat
 }
 
 /** Reads one range per line. Empty lines and everything after `#` are ignored. */
@@ -42,10 +55,23 @@ export class CidrListProvider implements IpIntelProvider {
     this.lists = lists.map(({ tag, cidrs }) => ({ tag, set: new RangeSet(cidrs) }))
   }
 
-  static fromFiles(files: ReadonlyArray<{ tag: string; file: string }>): CidrListProvider {
+  static fromFiles(files: ReadonlyArray<IpListFile>): CidrListProvider {
     return new CidrListProvider(
-      files.map(({ tag, file }) => {
-        const { cidrs, invalid } = parseCidrList(readFileSync(file, 'utf8'))
+      files.map((entry) => {
+        const { tag, file } = entry
+        const text = readFileSync(file, 'utf8')
+        if (entry.ranges) {
+          const { cidrs, rows, skipped } = parseRangeFile(text, entry.ranges)
+          // One line may be a header; many skipped lines mean that the columns are not the ones of this file
+          if (skipped > Math.max(1, rows * 0.01)) {
+            throw new Error(
+              `The IP list "${file}": ${skipped} of ${rows} lines are not a range in columns ` +
+                `${entry.ranges.from} and ${entry.ranges.to}. Check the columns and whether they are whole numbers`,
+            )
+          }
+          return { tag, cidrs }
+        }
+        const { cidrs, invalid } = parseCidrList(text)
         if (invalid.length > 0) {
           throw new Error(`The IP list "${file}" has invalid lines, the first is: ${invalid[0]}`)
         }

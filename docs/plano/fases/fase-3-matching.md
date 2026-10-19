@@ -1,6 +1,6 @@
 # Fase 3: motor de matching e confiança
 
-Status: **código concluído com ressalvas; parâmetros provisórios.** Branch `fase-2-ingestao` (sem commit; as quatro fases estão no mesmo diretório de trabalho).
+Status: **código concluído com ressalvas; parâmetros provisórios.** Branch `v5.3.0-fork` (sem commit; as quatro fases estão no mesmo diretório de trabalho).
 
 O motor funciona, é explicável e está testado. Mas **nenhum número dele foi medido com dados reais**, e por isso ele se declara "não calibrado" em cada resposta. Os valores dos parâmetros são palpites até alguém rodar `fit-model` com dados da Fase 0.
 
@@ -47,9 +47,10 @@ Cada resposta traz os sinais que mais pesaram, se concordaram ou discordaram, o 
 
 ## O que NÃO foi verificado (ressalvas)
 
+- **Política de ambiguidade (D78).** O dono escolheu evitar ligar duas pessoas diferentes. Empate entre candidatos vira aparelho novo (`identity.onAmbiguous: separate`), e sem modelo ajustado a barra de ligação é 0,99. Os números de limiar 0,95 abaixo são de antes dessa decisão.
 - Nenhum dado real além de 6 visitas de uma única máquina. Todos os parâmetros (chance de manter o valor por sinal, escala, limiar de 0,95) são provisórios.
 - A calibração, quando ajustada, é medida nos mesmos dados em que é ajustada. O relatório avisa; é preciso confirmar em dados novos.
-- Desempenho: cada resolução faz várias consultas SQL. Serve para milhares de aparelhos, não para milhões (Fase 8 deve manter contadores).
+- Desempenho: a Fase 8 trocou a contagem a cada visita por contadores mantidos por gatilhos (D69) e triplicou a vazão medida, mas a busca de candidatos ainda lê linhas proporcionais à população. Serve para milhares de aparelhos, não para milhões.
 - Vários processos ao mesmo tempo: duas primeiras visitas simultâneas do mesmo aparelho podem criar dois ids. Com um processo só isso não ocorre.
 
 ## Limites de projeto

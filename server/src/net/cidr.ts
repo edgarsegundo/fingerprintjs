@@ -166,6 +166,16 @@ export function isInAny(cidrs: readonly Cidr[], address: string): boolean {
   return !!ip && cidrs.some((cidr) => cidrContains(cidr, ip))
 }
 
+/** The address with the host part cleared: the first `bits4` bits of an IPv4 address or `bits6` of an IPv6 one */
+export function truncateIp(address: string, bits4: number, bits6: number): string | undefined {
+  const ip = parseIp(address)
+  if (!ip) {
+    return undefined
+  }
+  const bits = ip.family === 4 ? bits4 : bits6
+  return formatIp({ family: ip.family, value: ip.value & maskFor(ip.family, bits) })
+}
+
 /**
  * The network of the address: /24 for IPv4 and /64 for IPv6.
  * IPv6 devices rotate the last 64 bits (privacy extensions), so the /64 is the stable part.

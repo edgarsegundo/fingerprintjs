@@ -1,6 +1,6 @@
 # Fase 4: evidência de adulteração e proteção contra reenvio
 
-Status: **código concluído com ressalvas.** Branch `fase-2-ingestao` (sem commit; as cinco fases estão no mesmo diretório de trabalho).
+Status: **código concluído com ressalvas.** Branch `v5.3.0-fork` (sem commit; as cinco fases estão no mesmo diretório de trabalho).
 
 A fase dá ao servidor **evidência** de que um cliente foi adulterado, e nunca um veredito. Ela foi testada contra um navegador próprio adulterado de quatro formas. **Não foi testada contra navegadores anti-detecção profissionais**, que são feitos para passar justamente por estas verificações.
 
@@ -53,12 +53,12 @@ Isso mostra que a comparação página contra worker pega o tipo de ferramenta q
 
 ## Limites de projeto
 
-- **O motor de identidade ainda não usa a evidência.** Um payload forjado continua podendo criar aparelhos e distorcer as estatísticas de raridade (limitação da Fase 3). Falta decidir uma política, por exemplo não deixar uma visita de severidade alta ensinar o motor. Isso é decisão sua e entra na Fase 5.
+- **O motor de identidade usa a evidência só na política de aprendizado (D44).** Por padrão, uma visita com severidade alta não ensina o motor (`identity.learnFromTampered: not_high`). Um payload forjado que escape das verificações continua podendo criar aparelhos e distorcer as estatísticas de raridade.
 - **Resultado selado (sealed results) não foi implementado.** O servidor já devolve só um `requestId` e o backend do cliente consulta a API, então a falsificação do resultado no navegador não é um risco aqui. Só valeria a pena para evitar a latência dessa consulta.
 - **Comparações de sinais de rede (JA4 contra User-Agent) e de fuso contra IP** dependem de dados (tabela de JA4 por navegador, geolocalização de IP) que o projeto ainda não tem. Ficam para a Fase 5.
 - **O reenvio exato já era barrado** pelo nonce de uso único; esta fase só acrescentou a amarra ao cliente.
 
 ## O que o dono precisa decidir
 
-1. Se uma visita com evidência de severidade alta **deve** deixar de alimentar o motor de identidade.
+1. ~~Se uma visita com evidência de severidade alta deve deixar de alimentar o motor.~~ Resolvido como parâmetro (D44): padrão `not_high`, o dono muda por tenant.
 2. Se quer testar navegadores anti-detecção em contas próprias (eu não distribuo nem escrevo ferramenta de evasão; o dono consegue produtos comerciais e roda a coleta com eles).

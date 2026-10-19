@@ -1,7 +1,7 @@
-import { IdentityEngine } from '../identity/engine'
 import { extractFeatures } from '../identity/features'
 import { MemoryIdentityStore } from '../identity/memory_store'
 import { defaultModel, Model } from '../identity/model'
+import { SyncIdentityEngine } from '../identity/sync_engine'
 
 import type { Dataset, EvalEvent } from './dataset'
 import { legacyVisitorId } from './legacy'
@@ -31,7 +31,7 @@ export function assignLegacy(dataset: Dataset): Assignment[] {
  */
 export function assignWithEngine(dataset: Dataset, model: Model = defaultModel()): Assignment[] {
   let counter = 0
-  const engine = new IdentityEngine(new MemoryIdentityStore(), model, { newId: () => `v${++counter}` })
+  const engine = new SyncIdentityEngine(new MemoryIdentityStore(), model, { newId: () => `v${++counter}` })
   return [...dataset.events].sort(byTime).map((event) => {
     const features = extractFeatures({ components: event.components, extended: event.extended, network: event.network })
     const resolution = engine.resolve('eval', event.requestId, features, event.receivedAt)

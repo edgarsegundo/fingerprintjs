@@ -17,18 +17,22 @@ O cliente coleta sinais crus e o servidor decide quem é o visitante. O plano co
 
 ## Onde estamos
 
-Veja a tabela de status no [roadmap](docs/plano/roadmap.md). Resumo: Fase 1 (coletor no cliente) e Fase 2 (servidor de
-ingestão em `server/`) concluídas com ressalvas, descritas nos relatórios de fase. A Fase 0 (harness de avaliação e linha
-de base) ainda não foi feita e é pré-requisito para afirmar qualquer número de precisão e para calibrar a Fase 3.
-Pesquisa, inventário e ideias (Etapas 1 a 3 do pedido original) ainda não foram escritos.
+Veja a tabela de status no [roadmap](docs/plano/roadmap.md). Resumo em 2026-10-19: **todas as fases do plano têm código e
+testes** (0 a 10, a camada SaaS e o mecanismo do grafo compartilhado, que está **desligado e travado**). A fase 10 reúne tudo que
+dava para fazer sem dados reais ([relatório](docs/plano/fases/fase-10-sem-dados.md)). O que falta não é código:
 
-A Fase 0 tem o **código pronto** (harness, exportação, página de coleta com consentimento) e os **dados reais pendentes**:
-só o dono consegue recrutar voluntários e expor um servidor (hostname e porta). Nenhum número de precisão existe ainda.
-**Fase 3 (matching): código pronto, parâmetros provisórios.** Faltam os dados reais para `fit-model` e `eval-identity`.
-**Fase 4 (evidência de adulteração): código pronto.** Não foi testada contra navegadores anti-detecção profissionais.
-A **Fase 5** (Smart Signals: IP, VPN, bot, comportamento) precisa de decisões e de dados do dono; ver o relatório da Fase 4.
-**Próxima do dono: coletar os dados da Fase 0 (ver `docs/plano/guia-do-organizador.md` e `protocolo-coleta-etica.md`).** Não calibre nem
-afirme nada do matching com dado sintético.
+- **Dados reais da Fase 0** (só o dono recruta voluntários): sem eles não existe número de precisão, os parâmetros do motor
+  são provisórios (`calibrated: false`) e os pesos do risco são palpites. Ver `docs/plano/guia-do-organizador.md` e
+  `protocolo-coleta-etica.md`. Não calibre nem afirme nada com dado sintético.
+- **Revisão jurídica** (adiada para o fim, a pedido do dono): texto de consentimento da página de coleta, LIA, RIPD, política
+  de privacidade, o **código guardado no navegador** (D87, identificador persistente no aparelho do titular, desligado por padrão) (modelos em `docs/plano/privacidade/`) e o parecer sem o qual o grafo compartilhado não liga.
+- **Navegadores anti-detecção profissionais** nunca foram testados contra a evidência de adulteração.
+- **Faturamento, painel de cliente com login, DPA e SLA** do SaaS não existem.
+- **Escala:** o banco de produção é o MySQL (D79); medido só em notebook, cerca de 30 visitas por segundo (D82). Vários servidores sobre um MySQL funcionam e foram testados com dois (D89). A busca de candidatos foi medida até 1 milhão de aparelhos **inventados** (D90): só latência.
+- **Pesquisa** (`docs/plano/01-pesquisa-e-fontes.md`) foi mais rasa que o pedido original: cerca de 30 buscas.
+
+Documentos do plano: `01-pesquisa-e-fontes`, `02-inventario-de-capacidades`, `03-ideias-inovadoras`,
+`05-riscos-privacidade-e-compliance`, `06-fechamento-e-autocritica` (comece por este), `decisoes.md` (D1 a D95), relatórios em `docs/plano/fases/`.
 
 ## Mapa do repositório
 
@@ -36,10 +40,16 @@ afirme nada do matching com dado sintético.
 |---|---|
 | `src/` | Biblioteca do navegador. `src/sources/` são as 42 fontes originais, `src/agent.ts` é o `load()/get()` legado. |
 | `src/collector/` | Coletor novo (Fase 1): `collect()`, `send()`, fontes extras em `sources/`. |
-| `server/` | Servidor de ingestão (Fase 2), TypeScript para Node 22, sem dependência de execução. Veja `server/README.md`. |
+| `server/` | Servidor de ingestão (Fase 2), TypeScript para Node 22, sem dependência de execução com SQLite; o MySQL (banco de produção, D79) usa só o driver opcional `mysql2`. Veja `server/README.md`. |
 | `server/src/net/`, `tls/`, `ingest/`, `store/` | Sinais de rede (IP, cabeçalhos, HTTP/2), JA4 e front TLS, validação e nonce, armazenamento. |
 | `server/src/identity/` | Motor de matching (Fase 3): características, modelo, motor, armazenamento, ajuste. |
-| `server/src/tamper/` | Evidência de adulteração (Fase 4): 15 verificações puras e a leitura de plataforma. |
+| `server/src/settings/` | Configuração: tabela única de parâmetros, camadas, validação, recarga, referência gerada (`docs/configuracao.md`). |
+| `server/src/webhooks/`, `sdk/`, `dashboard/` | Entrega de webhooks (fila, assinatura, rede segura), SDK de Node e painel (Fase 6). |
+| `server/src/privacy/`, `audit/` | Forma do IP guardado e registro de acessos (Fase 7). Modelos jurídicos em `docs/plano/privacidade/`. |
+| `server/src/risk/` | Risco composto, fatos e regras de decisão (Fase 5), sempre por parâmetros do tenant. |
+| `server/src/tamper/` | Evidência de adulteração (Fase 4): 16 verificações puras e a leitura de plataforma. |
+| `server/src/environment/`, `net/bots.ts` | Fatos do ambiente (janela privada, placa virtual) e robôs de busca verificados por DNS (Fase 10). |
+| `server/src/mysql/`, `migrate.ts` | MySQL (banco de produção), vez entre instâncias, limites compartilhados e a migração do SQLite. |
 | `server/src/eval/` | Harness de avaliação (Fase 0): dataset, pares, pontuadores, estatística, relatório, gerador sintético. |
 | `tools/calibration/` | Página de coleta com consentimento para voluntários. |
 | `tools/dev-receiver.js` | Receptor de desenvolvimento do cliente. Não é o servidor de verdade. |
@@ -55,15 +65,21 @@ O Yarn não vem instalado. Use `npx --yes yarn@1.22.22 <comando>` (abreviado aqu
 yarn install --frozen-lockfile --ignore-scripts --ignore-engines   # primeira vez; --ignore-scripts evita o husky mexer no git
 yarn build            # bundle do navegador em dist/
 yarn lint             # tem de passar com zero avisos (--max-warnings 0)
-yarn test:local       # Karma: Chrome e Firefox headless, 229 testes na Fase 1
+yarn test:local       # Karma: Chrome e Firefox headless (262 testes)
 yarn check:dts && yarn check:ssr   # as duas checagens extras do CI
 yarn server:build && yarn server:test   # servidor (Fase 2); precisa de Node 22 por causa do node:sqlite
+FP_TEST_MYSQL_URL=mysql://root:senha@127.0.0.1:3306 yarn server:test   # inclui os testes de contrato do MySQL (cada teste cria e apaga um banco)
+node server/dist/cli.js config-reference --out docs/configuracao.md   # regenera a referência; um teste falha se ela envelhecer
+node server/dist/cli.js rules-reference --out docs/regras.md   # regras e fatos; idem, um teste vigia
+node server/dist/cli.js fetch-ip-list aws|gcp|tor --out lista.txt   # lista pública de IPs no formato de ipLists
+node tools/loadtest/run.js --url http://127.0.0.1:8080 --pk pk_... --seconds 20 --concurrency 16 --devices 5000   # carga na coleta (servidor de teste, banco descartável)
 node server/dist/cli.js new-tenant <id>   # cria chaves de um tenant; a chave secreta aparece uma vez
 node server/dist/cli.js export-events --config cfg.json --tenant <id> --out dataset.jsonl   # dataset rotulado (IP em hash)
 node server/dist/cli.js eval dataset.jsonl --out relatorio.md      # precisa de `yarn build` antes
 node server/dist/cli.js fit-model dataset.jsonl --out model.json   # aprende os parâmetros (precisa de centenas de aparelhos)
 node server/dist/cli.js eval-identity dataset.jsonl --model model.json   # motor contra o hash original, em ordem de tempo
 node server/dist/cli.js last-events --config cfg.json --tenant <id>   # últimas visitas e o IP que o servidor viu
+node server/dist/cli.js migrate-sqlite --from events.db --config cfg-mysql.json   # copia um SQLite para o MySQL e confere
 node server/dist/cli.js delete-linked --config cfg.json --tenant <id> --linked-id <codigo>  # retirada de participante
 docker build -f server/Dockerfile -t fingerprint-server .   # na raiz do repositório
 ```
@@ -83,8 +99,10 @@ docker build -f server/Dockerfile -t fingerprint-server .   # na raiz do reposit
 5. **Privacidade é requisito de projeto**: coletar o mínimo, `exclude` para cortar sinais, retenção definida,
    `tenant_id` em todo dado desde o primeiro dia.
 6. **Não afirme que algo é melhor que o Pro sem dizer como foi medido.** Sem harness de avaliação, não há número.
-7. **Nunca faça commit, push nem crie branch: os commits são sempre do dono.** (Duas branches `fase-N-...` foram criadas
-   antes dessa regra, sem commits.) Deixe o trabalho no diretório de trabalho e diga o que mudou.
+7. **Nunca faça commit, push, checkout, rename nem crie ou apague branch, a menos que o dono peça naquela mensagem: os commits
+   e os branches são sempre do dono.** Só há um branch de trabalho, `v5.3.0-fork`. (Antes dessa regra, a IA criou dois branches
+   `fase-N-...` sem pedido; o dono mandou juntar tudo em `v5.3.0-fork`.) Deixe o trabalho no diretório de trabalho e diga o que
+   mudou. Comandos de git só de leitura (`status`, `diff`, `log`) são livres.
 8. **No servidor, todo dado e toda leitura levam `tenantId`.** Não registre IP, payload nem chave em log. Chave secreta só
    existe como hash. Cabeçalho de IP só vale de proxy confiável, lido da direita.
 9. **Impressões de ordem de cabeçalhos e de HTTP/2 só valem quando `viaProxy` é `false`.** Atrás de proxy elas descrevem o
@@ -103,6 +121,9 @@ docker build -f server/Dockerfile -t fingerprint-server .   # na raiz do reposit
 16. **O nginx do dono** está em `/Users/edgar/Repos/reverse-proxy-config` (VPS compartilhado, ~20 sites). Foi dada permissão
     para ler e, se preciso, adicionar coisas. Nada foi alterado até agora. Não reorganize a porta 443 nem os `sites/`
     sem pedido explícito. Decisão D14.
+17. **Todo número de comportamento é parâmetro** (D41). Limite, limiar, janela, tamanho e política entram em
+    `server/src/settings/parameters.ts`, com padrão, faixa e descrição, valem por tenant e se recarregam com `SIGHUP`.
+    Depois regenere `docs/configuracao.md` (um teste falha se ela envelhecer). Nada de constante solta no código de decisão.
 
 ## Convenções de código
 

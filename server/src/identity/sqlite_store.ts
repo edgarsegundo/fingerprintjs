@@ -1,8 +1,18 @@
 import type { DatabaseSync, StatementSync } from 'node:sqlite'
 
 import type { Features } from './features'
-import { smoothedAgreement, type PopulationStats } from './model'
-import type { DeviceProfile, IdentityStore, Resolution } from './store'
+import { smoothedAgreementFromTotals, type PopulationStats } from './model'
+import {
+  Activity,
+  ActivityQuery,
+  CandidateRule,
+  defaultCandidateRule,
+  DeviceEdit,
+  DeviceProfile,
+  FeatureAnonymity,
+  IdentityStore,
+  Resolution,
+} from './store'
 
 /**
  * Keeps the devices, their feature values and the resolutions in the same SQLite file as the events.
@@ -13,7 +23,7 @@ import type { DeviceProfile, IdentityStore, Resolution } from './store'
 export class SqliteIdentityStore implements IdentityStore {
   private readonly countDevices: StatementSync
   private readonly countWithValue: StatementSync
-  private readonly countsOfFeature: StatementSync
+  private readonly featureTotals: StatementSync
   private readonly devicesWithValue: StatementSync
   private readonly insertDevice: StatementSync
   private readonly touchDevice: StatementSync
@@ -22,9 +32,6 @@ export class SqliteIdentityStore implements IdentityStore {
   private readonly selectFeatures: StatementSync
   private readonly upsertResolution: StatementSync
   private readonly selectResolution: StatementSync
-  /** Bumped on every write; the cached agreement estimates of an older version are thrown away */
-  private version = 0
-  private readonly agreementCache = new Map<string, { version: number; value: number }>()
 
   constructor(private readonly db: DatabaseSync) {
     this.db.exec(`
@@ -45,7 +52,11 @@ export class SqliteIdentityStore implements IdentityStore {
         last_seen INTEGER NOT NULL,
         PRIMARY KEY (tenant_id, device_id, feature, value)
       );
-      CREATE INDEX IF NOT EXISTS identity_features_lookup ON identity_features (tenant_id, feature, value);
+      -- With the device id in the index, finding the devices of a value never has to read the table
+      CREATE INDEX IF NOT EXISTS identity_features_by_value ON identity_features (tenant_id, feature, value, device_id);
+      -- The devices of a value that were seen most recently come first without reading the others
+      CREATE INDEX IF NOT EXISTS identity_features_by_seen ON identity_features (tenant_id, feature, value, last_seen);
+      DROP INDEX IF EXISTS identity_features_lookup;
       CREATE TABLE IF NOT EXISTS identity_resolutions (
         tenant_id TEXT NOT NULL,
         request_id TEXT NOT NULL,
@@ -54,16 +65,35 @@ export class SqliteIdentityStore implements IdentityStore {
         PRIMARY KEY (tenant_id, request_id)
       );
       CREATE INDEX IF NOT EXISTS identity_resolutions_device ON identity_resolutions (tenant_id, device_id);
+      -- A device that was merged into another: the old id means the new one from then on
+      CREATE TABLE IF NOT EXISTS identity_aliases (
+        tenant_id TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY (tenant_id, from_id)
+      );
+      CREATE INDEX IF NOT EXISTS identity_aliases_to ON identity_aliases (tenant_id, to_id);
+      CREATE TABLE IF NOT EXISTS identity_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      -- Running counters, so that a visit does not have to count the whole population again (see the triggers below)
+      CREATE TABLE IF NOT EXISTS identity_value_counts (
+        tenant_id TEXT NOT NULL, feature TEXT NOT NULL, value TEXT NOT NULL, devices INTEGER NOT NULL,
+        PRIMARY KEY (tenant_id, feature, value)
+      );
+      CREATE TABLE IF NOT EXISTS identity_feature_stats (
+        tenant_id TEXT NOT NULL, feature TEXT NOT NULL, total INTEGER NOT NULL, pairs INTEGER NOT NULL,
+        PRIMARY KEY (tenant_id, feature)
+      );
+      CREATE TABLE IF NOT EXISTS identity_tenant_stats (tenant_id TEXT PRIMARY KEY, devices INTEGER NOT NULL);
     `)
-    this.countDevices = db.prepare('SELECT COUNT(*) AS c FROM identity_devices WHERE tenant_id = ?')
+    this.buildCounters()
+    this.countDevices = db.prepare('SELECT devices AS c FROM identity_tenant_stats WHERE tenant_id = ?')
     this.countWithValue = db.prepare(
-      'SELECT COUNT(*) AS c FROM identity_features WHERE tenant_id = ? AND feature = ? AND value = ?',
+      'SELECT devices AS c FROM identity_value_counts WHERE tenant_id = ? AND feature = ? AND value = ?',
     )
-    this.countsOfFeature = db.prepare(
-      'SELECT COUNT(*) AS c FROM identity_features WHERE tenant_id = ? AND feature = ? GROUP BY value',
+    this.featureTotals = db.prepare(
+      'SELECT total, pairs FROM identity_feature_stats WHERE tenant_id = ? AND feature = ?',
     )
     this.devicesWithValue = db.prepare(
-      'SELECT device_id FROM identity_features WHERE tenant_id = ? AND feature = ? AND value = ? LIMIT ?',
+      `SELECT device_id FROM identity_features WHERE tenant_id = ? AND feature = ? AND value = ?
+       ORDER BY last_seen DESC, device_id LIMIT ?`,
     )
     this.insertDevice = db.prepare(
       'INSERT INTO identity_devices (tenant_id, device_id, created_at, last_seen_at, visits) VALUES (?, ?, ?, ?, 0)',
@@ -88,8 +118,75 @@ export class SqliteIdentityStore implements IdentityStore {
        VALUES (?, ?, ?, ?)`,
     )
     this.selectResolution = db.prepare(
-      'SELECT resolution_json FROM identity_resolutions WHERE tenant_id = ? AND request_id = ?',
+      'SELECT resolution_json, device_id FROM identity_resolutions WHERE tenant_id = ? AND request_id = ?',
     )
+  }
+
+  /**
+   * The counters are kept by triggers on the two tables that hold the facts, so every way of writing or deleting
+   * (a visit, the clean-up of orphans, a deletion on request) keeps them right. A database made before the counters
+   * existed, or one that is out of step, is counted again once, in one transaction, before the triggers are in place.
+   */
+  private buildCounters(): void {
+    const version = '1'
+    const current = this.db.prepare("SELECT value FROM identity_meta WHERE key = 'counters'").get() as
+      | { value: string }
+      | undefined
+    if (current?.value === version) {
+      return
+    }
+    this.transaction(() => {
+      this.db.exec(`
+        DROP TRIGGER IF EXISTS identity_features_added;
+        DROP TRIGGER IF EXISTS identity_features_removed;
+        DROP TRIGGER IF EXISTS identity_devices_added;
+        DROP TRIGGER IF EXISTS identity_devices_removed;
+        DELETE FROM identity_value_counts;
+        DELETE FROM identity_feature_stats;
+        DELETE FROM identity_tenant_stats;
+        INSERT INTO identity_value_counts
+          SELECT tenant_id, feature, value, COUNT(*) FROM identity_features GROUP BY tenant_id, feature, value;
+        INSERT INTO identity_feature_stats
+          SELECT tenant_id, feature, SUM(devices), SUM(devices * (devices - 1) / 2)
+            FROM identity_value_counts GROUP BY tenant_id, feature;
+        INSERT INTO identity_tenant_stats SELECT tenant_id, COUNT(*) FROM identity_devices GROUP BY tenant_id;
+
+        -- A device gets a value: one more device has it, and it pairs with each device that already had it
+        CREATE TRIGGER identity_features_added AFTER INSERT ON identity_features BEGIN
+          INSERT INTO identity_feature_stats (tenant_id, feature, total, pairs)
+            VALUES (NEW.tenant_id, NEW.feature, 1, 0)
+            ON CONFLICT (tenant_id, feature) DO UPDATE SET
+              total = total + 1,
+              pairs = pairs + COALESCE((SELECT devices FROM identity_value_counts
+                WHERE tenant_id = NEW.tenant_id AND feature = NEW.feature AND value = NEW.value), 0);
+          INSERT INTO identity_value_counts (tenant_id, feature, value, devices)
+            VALUES (NEW.tenant_id, NEW.feature, NEW.value, 1)
+            ON CONFLICT (tenant_id, feature, value) DO UPDATE SET devices = devices + 1;
+        END;
+        -- A device loses a value: the reverse
+        CREATE TRIGGER identity_features_removed AFTER DELETE ON identity_features BEGIN
+          UPDATE identity_feature_stats SET
+            total = total - 1,
+            pairs = pairs - (SELECT devices - 1 FROM identity_value_counts
+              WHERE tenant_id = OLD.tenant_id AND feature = OLD.feature AND value = OLD.value)
+            WHERE tenant_id = OLD.tenant_id AND feature = OLD.feature;
+          UPDATE identity_value_counts SET devices = devices - 1
+            WHERE tenant_id = OLD.tenant_id AND feature = OLD.feature AND value = OLD.value;
+          DELETE FROM identity_value_counts
+            WHERE tenant_id = OLD.tenant_id AND feature = OLD.feature AND value = OLD.value AND devices <= 0;
+          DELETE FROM identity_feature_stats WHERE tenant_id = OLD.tenant_id AND feature = OLD.feature AND total <= 0;
+        END;
+        CREATE TRIGGER identity_devices_added AFTER INSERT ON identity_devices BEGIN
+          INSERT INTO identity_tenant_stats (tenant_id, devices) VALUES (NEW.tenant_id, 1)
+            ON CONFLICT (tenant_id) DO UPDATE SET devices = devices + 1;
+        END;
+        CREATE TRIGGER identity_devices_removed AFTER DELETE ON identity_devices BEGIN
+          UPDATE identity_tenant_stats SET devices = devices - 1 WHERE tenant_id = OLD.tenant_id;
+          DELETE FROM identity_tenant_stats WHERE tenant_id = OLD.tenant_id AND devices <= 0;
+        END;
+      `)
+      this.db.prepare("INSERT OR REPLACE INTO identity_meta (key, value) VALUES ('counters', ?)").run(version)
+    })
   }
 
   private transaction<T>(action: () => T): T {
@@ -104,38 +201,68 @@ export class SqliteIdentityStore implements IdentityStore {
     }
   }
 
-  population(tenantId: string): PopulationStats {
-    const devices = Number((this.countDevices.get(tenantId) as { c: number }).c)
+  // The features are for stores on the network, which read the population once, for this visit
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  population(tenantId: string, _features?: Features): PopulationStats {
+    // One of these lives for one decision, in which nothing is written, so each answer can be remembered
+    const values = new Map<string, number>()
+    const agreement = new Map<string, number>()
     return {
-      devices,
-      devicesWithValue: (feature, value) =>
-        Number((this.countWithValue.get(tenantId, feature, value) as { c: number }).c),
-      agreementProbability: (feature) => {
-        const key = `${tenantId}\u0000${feature}`
-        const cached = this.agreementCache.get(key)
-        if (cached && cached.version === this.version) {
-          return cached.value
+      devices: this.deviceCount(tenantId),
+      devicesWithValue: (feature, value) => {
+        const key = `${feature}\u0000${value}`
+        let count = values.get(key)
+        if (count === undefined) {
+          count = this.valueCount(tenantId, feature, value)
+          values.set(key, count)
         }
-        const counts = (this.countsOfFeature.all(tenantId, feature) as Array<{ c: number }>).map((row) => Number(row.c))
-        const value = smoothedAgreement(counts)
-        this.agreementCache.set(key, { version: this.version, value })
-        return value
+        return count
+      },
+      agreementProbability: (feature) => {
+        let probability = agreement.get(feature)
+        if (probability === undefined) {
+          const row = this.featureTotals.get(tenantId, feature) as { total: number; pairs: number } | undefined
+          probability = smoothedAgreementFromTotals(Number(row?.total ?? 0), Number(row?.pairs ?? 0))
+          agreement.set(feature, probability)
+        }
+        return probability
       },
     }
   }
 
-  findCandidates(tenantId: string, features: Features, limit: number): string[] {
-    const total = Number((this.countDevices.get(tenantId) as { c: number }).c)
-    const tooCommon = Math.max(50, total * 0.05)
+  private deviceCount(tenantId: string): number {
+    const row = this.countDevices.get(tenantId) as { c: number } | undefined
+    return Number(row?.c ?? 0)
+  }
+
+  private valueCount(tenantId: string, feature: string, value: string): number {
+    const row = this.countWithValue.get(tenantId, feature, value) as { c: number } | undefined
+    return Number(row?.c ?? 0)
+  }
+
+  findCandidates(
+    tenantId: string,
+    features: Features,
+    limit: number,
+    rule: CandidateRule = defaultCandidateRule,
+  ): string[] {
+    const total = this.deviceCount(tenantId)
+    const tooCommon = Math.max(rule.minDevices, total * rule.maxShare)
     const rarity = new Map<string, number>()
     for (const [feature, value] of Object.entries(features)) {
-      const rows = this.devicesWithValue.all(tenantId, feature, value, Math.ceil(tooCommon) + 1) as Array<{
-        device_id: string
-      }>
-      if (rows.length === 0 || rows.length > tooCommon) {
+      // The counter says at once whether a value is shared by too many devices to be worth reading them all
+      const sharing = this.valueCount(tenantId, feature, value)
+      if (sharing === 0 || sharing > tooCommon) {
         continue
       }
-      const weight = -Math.log(rows.length / Math.max(1, total)) + 1e-9
+      const rows = this.devicesWithValue.all(tenantId, feature, value, rule.rowsPerValue) as Array<{
+        device_id: string
+      }>
+      if (rows.length === 0) {
+        continue
+      }
+      // The weight is the rarity of the value among all devices, not among the ones that were read
+      const weight = -Math.log(sharing / Math.max(1, total)) + 1e-9
       for (const row of rows) {
         rarity.set(row.device_id, (rarity.get(row.device_id) ?? 0) + weight)
       }
@@ -144,6 +271,13 @@ export class SqliteIdentityStore implements IdentityStore {
       .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
       .slice(0, limit)
       .map(([deviceId]) => deviceId)
+  }
+
+  getProfiles(tenantId: string, deviceIds: readonly string[]): DeviceProfile[] {
+    return deviceIds.flatMap((id) => {
+      const profile = this.getProfile(tenantId, id)
+      return profile ? [profile] : []
+    })
   }
 
   getProfile(tenantId: string, deviceId: string): DeviceProfile | undefined {
@@ -194,7 +328,6 @@ export class SqliteIdentityStore implements IdentityStore {
     for (const [feature, value] of Object.entries(features)) {
       this.upsertFeature.run(tenantId, deviceId, feature, value, at)
     }
-    this.version++
   }
 
   saveResolution(tenantId: string, requestId: string, deviceId: string, resolution: Resolution): void {
@@ -202,8 +335,112 @@ export class SqliteIdentityStore implements IdentityStore {
   }
 
   getResolution(tenantId: string, requestId: string): Resolution | undefined {
-    const row = this.selectResolution.get(tenantId, requestId) as { resolution_json: string } | undefined
-    return row ? (JSON.parse(row.resolution_json) as Resolution) : undefined
+    const row = this.selectResolution.get(tenantId, requestId) as
+      | { resolution_json: string; device_id: string }
+      | undefined
+    // The device the visit belongs to now: a merge or a split may have moved it since the visit was decided
+    return row ? { ...(JSON.parse(row.resolution_json) as Resolution), visitorId: row.device_id } : undefined
+  }
+
+  resolveAlias(tenantId: string, deviceId: string): string {
+    const row = this.db
+      .prepare('SELECT to_id FROM identity_aliases WHERE tenant_id = ? AND from_id = ?')
+      .get(tenantId, deviceId) as { to_id: string } | undefined
+    return row?.to_id ?? deviceId
+  }
+
+  applyEdit(tenantId: string, edit: DeviceEdit): void {
+    this.transaction(() => {
+      const ids = [...(edit.remove ?? []), ...(edit.write ?? []).map((profile) => profile.deviceId)]
+      // The triggers on these two tables keep the counters of the population right, for deletes and inserts alike
+      for (const id of ids) {
+        this.db.prepare('DELETE FROM identity_features WHERE tenant_id = ? AND device_id = ?').run(tenantId, id)
+        this.db.prepare('DELETE FROM identity_devices WHERE tenant_id = ? AND device_id = ?').run(tenantId, id)
+      }
+      const insertDevice = this.db.prepare(
+        'INSERT INTO identity_devices (tenant_id, device_id, created_at, last_seen_at, visits) VALUES (?, ?, ?, ?, ?)',
+      )
+      const insertFeature = this.db.prepare(
+        `INSERT INTO identity_features (tenant_id, device_id, feature, value, count, last_seen)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      for (const profile of edit.write ?? []) {
+        insertDevice.run(tenantId, profile.deviceId, profile.firstSeen, profile.lastSeen, profile.visits)
+        for (const [feature, values] of profile.features) {
+          for (const [value, use] of values) {
+            insertFeature.run(tenantId, profile.deviceId, feature, value, use.count, use.lastSeen)
+          }
+        }
+      }
+      const move = edit.moveVisits
+      if (move?.from !== undefined) {
+        this.db
+          .prepare('UPDATE identity_resolutions SET device_id = ? WHERE tenant_id = ? AND device_id = ?')
+          .run(move.to, tenantId, move.from)
+      }
+      for (const requestId of move?.requestIds ?? []) {
+        this.db
+          .prepare('UPDATE identity_resolutions SET device_id = ? WHERE tenant_id = ? AND request_id = ?')
+          .run(move?.to ?? '', tenantId, requestId)
+      }
+      if (edit.alias) {
+        this.db
+          .prepare('UPDATE identity_aliases SET to_id = ? WHERE tenant_id = ? AND to_id = ?')
+          .run(edit.alias.to, tenantId, edit.alias.from)
+        this.db
+          .prepare(
+            'INSERT OR REPLACE INTO identity_aliases (tenant_id, from_id, to_id, created_at) VALUES (?, ?, ?, ?)',
+          )
+          .run(tenantId, edit.alias.from, edit.alias.to, edit.alias.at)
+      }
+    })
+  }
+
+  anonymity(tenantId: string, k: number): FeatureAnonymity[] {
+    const rows = this.db
+      .prepare(
+        `SELECT feature, SUM(devices) AS devices, COALESCE(SUM(CASE WHEN devices < ? THEN devices END), 0) AS below
+           FROM identity_value_counts WHERE tenant_id = ? GROUP BY feature ORDER BY feature`,
+      )
+      .all(k, tenantId) as Array<{ feature: string; devices: number; below: number }>
+    return rows.map((row) => ({ feature: row.feature, devices: Number(row.devices), devicesBelowK: Number(row.below) }))
+  }
+
+  recentRequests(tenantId: string, deviceId: string, limit: number): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT e.request_id AS request_id
+           FROM identity_resolutions r
+           JOIN events e ON e.tenant_id = r.tenant_id AND e.request_id = r.request_id
+          WHERE r.tenant_id = ? AND r.device_id = ?
+          ORDER BY e.received_at DESC, e.request_id DESC
+          LIMIT ?`,
+      )
+      .all(tenantId, deviceId, limit) as Array<{ request_id: string }>
+    return rows.map((row) => row.request_id)
+  }
+
+  activity(tenantId: string, query: ActivityQuery): Activity {
+    if (query.deviceId === undefined && query.ip === undefined) {
+      throw new Error('activity needs a device or an address')
+    }
+    const byDevice = query.deviceId !== undefined
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS visits, COUNT(DISTINCT r.device_id) AS devices,
+                COUNT(DISTINCT e.linked_id) AS linked_ids, COUNT(DISTINCT e.ip) AS ips
+           FROM identity_resolutions r
+           JOIN events e ON e.tenant_id = r.tenant_id AND e.request_id = r.request_id
+          WHERE r.tenant_id = ? AND e.received_at >= ? AND e.received_at <= ?
+            AND ${byDevice ? 'r.device_id = ?' : 'e.ip = ?'}`,
+      )
+      .get(tenantId, query.since, query.until, (byDevice ? query.deviceId : query.ip) ?? '') as Record<string, number>
+    return {
+      visits: Number(row.visits),
+      devices: Number(row.devices),
+      linkedIds: Number(row.linked_ids),
+      ips: Number(row.ips),
+    }
   }
 
   /** Forgets the resolutions whose event was deleted, and then the devices that no resolution points to any more */
@@ -225,11 +462,15 @@ export class SqliteIdentityStore implements IdentityStore {
           WHERE r.tenant_id = identity_devices.tenant_id AND r.device_id = identity_devices.device_id
         )`,
       )
-      const changes = Number(removed.run().changes)
-      if (changes > 0) {
-        this.version++
-      }
-      return changes
+      const count = Number(removed.run().changes)
+      // A merged-away id means nothing once the device it points to is gone
+      this.db.exec(`
+        DELETE FROM identity_aliases WHERE NOT EXISTS (
+          SELECT 1 FROM identity_devices d
+          WHERE d.tenant_id = identity_aliases.tenant_id AND d.device_id = identity_aliases.to_id
+        )
+      `)
+      return count
     })
   }
 }

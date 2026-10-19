@@ -46,7 +46,20 @@ jobs:
   server:
     name: Test the ingestion server
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    # The same tests also run against a real MySQL (8.0.19 or newer). Each test gets a throwaway database.
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpw
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -prootpw"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,4 +74,41 @@ jobs:
       - name: Build the browser library
         run: yarn build
       - name: Build and test the server
+        env:
+          FP_TEST_MYSQL_URL: mysql://root:rootpw@127.0.0.1:3306
         run: yarn server:test
+  # The browser tests that do not need BrowserStack: headless Chrome and Firefox of the runner
+  local-browsers:
+    name: Test in local Chrome and Firefox
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Node packages
+        run: yarn install --frozen-lockfile --ignore-scripts
+      - name: Test
+        run: yarn test:local
+  # The image must build, start, and say that it is ready
+  docker:
+    name: Build the server image and check its health
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build
+        run: docker build -f server/Dockerfile -t fingerprint-server:ci .
+      - name: Start and wait for the health check
+        run: |
+          mkdir -p ci-config
+          SECRET=$(printf 'n%.0s' {1..40})
+          HASH=$(printf sk | sha256sum | cut -d' ' -f1)
+          printf '{"listen":{"host":"0.0.0.0","port":8443},"nonceSecret":"%s","databasePath":"/tmp/events.db","tenants":[{"id":"t","publicKey":"pk_ci_0123456789abcdef","secretKeySha256":["%s"]}]}' "$SECRET" "$HASH" > ci-config/config.json
+          docker run -d --name fp -p 8443:8443 -v "$PWD/ci-config:/config:ro" fingerprint-server:ci
+          for i in $(seq 1 30); do
+            [ "$(docker inspect --format '{{.State.Health.Status}}' fp)" = healthy ] && exit 0
+            sleep 2
+          done
+          docker logs fp
+          exit 1

@@ -1,21 +1,25 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { IdentityEngine } from './engine'
+import { ResolveParams } from './decision'
 import { Features } from './features'
 import { MemoryIdentityStore } from './memory_store'
 import { defaultModel, Model } from './model'
+import { SyncIdentityEngine } from './sync_engine'
 
 function makeEngine(overrides: Partial<Model> = {}) {
   let counter = 0
   const store = new MemoryIdentityStore()
-  const engine = new IdentityEngine(
+  const engine = new SyncIdentityEngine(
     store,
-    { ...defaultModel(), ...overrides },
+    // These tests are about how the engine decides, not about where the bar is, so they use a lower one than the
+    // default; the tests about the bar and the ties say which they use
+    { ...defaultModel(), matchProbability: 0.95, ...overrides },
     { newId: () => `dev${++counter}`, now: () => 1000 },
   )
   let request = 0
-  const visit = (features: Features, tenant = 't1') => engine.resolve(tenant, `r${++request}`, features, 1000 + request)
+  const visit = (features: Features, tenant = 't1', params: ResolveParams = {}) =>
+    engine.resolve(tenant, `r${++request}`, features, 1000 + request, params)
   return { engine, store, visit }
 }
 
@@ -197,10 +201,60 @@ describe('IdentityEngine', () => {
     const first = visit({ ...shared, hardwareConcurrency: 'a1', deviceMemory: 'a2', screenResolution: 'a3' })
     const second = visit({ ...shared, hardwareConcurrency: 'b1', deviceMemory: 'b2', screenResolution: 'b3' })
     assert.notEqual(first.visitorId, second.visitorId, 'three stable signals differ, so these are two devices')
-    const result = visit(shared) // a visit that does not say which of the two it is
-    assert.equal(result.matched, true)
-    assert.equal(result.ambiguous, true)
-    assert.ok(result.candidates >= 2)
+    // A visit that does not say which of the two it is
+    const attached = visit(shared, 't1', { onAmbiguous: 'attach' })
+    assert.equal(attached.matched, true)
+    assert.equal(attached.ambiguous, true)
+    assert.ok(attached.candidates >= 2)
+    assert.ok([first.visitorId, second.visitorId].includes(attached.visitorId))
+    assert.equal(attached.possibleLink, undefined, 'it was attached, so there is nothing to mark')
+  })
+
+  it('does not attach a visit that fits two devices alike, since the wrong person is the costlier mistake', () => {
+    const { visit, store } = makeEngine()
+    for (let n = 1; n <= 50; n++) {
+      visit(device(n))
+    }
+    const shared = { canvas: 'twin', fonts: 'twin', webglRenderer: 'twin' }
+    const first = visit({ ...shared, hardwareConcurrency: 'a1', deviceMemory: 'a2', screenResolution: 'a3' })
+    const second = visit({ ...shared, hardwareConcurrency: 'b1', deviceMemory: 'b2', screenResolution: 'b3' })
+    const devicesBefore = store.population('t1').devices
+    // This is the default
+    const result = visit(shared)
+    assert.equal(result.matched, false)
+    assert.equal(result.ambiguous, true, 'it says why')
+    assert.ok(
+      [first.visitorId, second.visitorId].includes(result.possibleLink?.visitorId ?? ''),
+      'and who is the closest',
+    )
+    assert.notEqual(result.visitorId, first.visitorId)
+    assert.notEqual(result.visitorId, second.visitorId)
+    assert.equal(store.population('t1').devices, devicesBefore + 1, 'a new device was made')
+    // The same, said out loud
+    assert.equal(visit(shared, 't1', { onAmbiguous: 'separate' }).matched, false)
+  })
+
+  it('still attaches a visit that clearly fits one device, whatever the tie rule', () => {
+    const { visit } = makeEngine()
+    for (let n = 1; n <= 20; n++) {
+      visit(device(n))
+    }
+    for (const onAmbiguous of ['separate', 'attach'] as const) {
+      const result = visit(device(7), 't1', { onAmbiguous })
+      assert.equal(result.matched, true, onAmbiguous)
+      assert.equal(result.ambiguous, false, onAmbiguous)
+    }
+  })
+
+  it('does not link on thin evidence at the default bar, which is high', () => {
+    const made = makeEngine({ matchProbability: defaultModel().matchProbability })
+    for (let n = 1; n <= 5; n++) {
+      made.visit(device(n))
+    }
+    // Two of eight signals agree: not enough to say it is the same person
+    const result = made.visit({ canvas: 'canvas2', userAgentVersion: 'ua2-v1' })
+    assert.equal(result.matched, false)
+    assert.ok(defaultModel().matchProbability >= 0.99)
   })
 
   it('is not ambiguous when one device clearly fits better', () => {
@@ -271,5 +325,94 @@ describe('IdentityEngine', () => {
     const partial: Features = { canvas: 'canvas2', userAgentVersion: 'ua2-v1' }
     assert.equal(loose.visit(partial).matched, true)
     assert.equal(strict.visit(partial).matched, false)
+  })
+
+  describe('parameters of one call', () => {
+    const crowd = () => {
+      const made = makeEngine()
+      for (let n = 1; n <= 30; n++) {
+        made.visit(device(n))
+      }
+      return made
+    }
+
+    it('compares at most as many devices as it is told to', () => {
+      const { engine } = crowd()
+      const features = { timezone: 'tz-common', platform: 'platform-common' } // shared by all 30
+      assert.equal(engine.resolve('t1', 'a', features, 5000, { maxCandidates: 3, learn: false }).candidates, 3)
+      assert.equal(engine.resolve('t1', 'b', features, 5000, { maxCandidates: 12, learn: false }).candidates, 12)
+    })
+
+    it('lists as many features in the explanation as it is told to', () => {
+      const { engine } = crowd()
+      const sizes = [1, 3, 8].map(
+        (explanationSize) =>
+          engine.resolve('t1', `e${explanationSize}`, device(4), 5000, { explanationSize, learn: false }).explanation
+            .length,
+      )
+      assert.deepEqual(sizes, [1, 3, 8])
+    })
+
+    it('calls the choice ambiguous according to the margin it is told to use', () => {
+      const { visit, engine } = makeEngine()
+      for (let n = 1; n <= 50; n++) {
+        visit(device(n))
+      }
+      const shared = { canvas: 'twin', fonts: 'twin', webglRenderer: 'twin' }
+      visit({ ...shared, hardwareConcurrency: 'a1', deviceMemory: 'a2', screenResolution: 'a3' })
+      visit({ ...shared, hardwareConcurrency: 'b1', deviceMemory: 'b2', screenResolution: 'b3' })
+      const gap = (margin: number) =>
+        engine.resolve('t1', `m${margin}`, shared, 5000, { ambiguityMargin: margin, learn: false })
+      assert.equal(gap(0).ambiguous, false, 'with no margin even an exact tie is not called ambiguous')
+      assert.equal(gap(1000).ambiguous, true, 'a huge margin makes any runner-up count')
+    })
+
+    it('does not teach anything when learn is false, but still answers', () => {
+      const { engine, store, visit } = makeEngine()
+      const unknown = engine.resolve('t1', 'x', device(1), 2000, { learn: false })
+      assert.equal(unknown.learned, false)
+      assert.equal(unknown.matched, false)
+      assert.equal(store.population('t1').devices, 0)
+      assert.equal(visit(device(1)).matched, false, 'the visit that could not teach left nothing to match')
+      const known = engine.resolve('t1', 'y', device(1), 2001, { learn: false })
+      assert.equal(known.matched, true)
+      assert.equal(known.learned, false)
+    })
+
+    it('marks a possible link only below the match bar, above its own, and never when matched', () => {
+      const { engine, visit } = makeEngine({ matchProbability: 0.999999 })
+      for (let n = 1; n <= 5; n++) {
+        visit(device(n))
+      }
+      const partial: Features = { canvas: 'canvas2', userAgentVersion: 'ua2-v1' }
+      const marked = engine.resolve('t1', 'p1', partial, 5000, { possibleLinkProbability: 0.2, learn: false })
+      assert.equal(marked.matched, false)
+      assert.equal(marked.possibleLink?.visitorId, 'dev2')
+      assert.equal(marked.thresholds.possibleLink, 0.2)
+      const off = engine.resolve('t1', 'p2', partial, 5000, { possibleLinkProbability: null, learn: false })
+      assert.equal(off.possibleLink, undefined)
+      assert.equal(engine.resolve('t1', 'p3', partial, 5000, { learn: false }).possibleLink, undefined)
+      const tooHigh = engine.resolve('t1', 'p4', partial, 5000, { possibleLinkProbability: 0.999998, learn: false })
+      assert.equal(tooHigh.possibleLink, undefined)
+
+      const loose = makeEngine({ matchProbability: 0.5 })
+      for (let n = 1; n <= 5; n++) {
+        loose.visit(device(n))
+      }
+      const matched = loose.engine.resolve('t1', 'p5', partial, 5000, { possibleLinkProbability: 0.2, learn: false })
+      assert.equal(matched.matched, true)
+      assert.equal(matched.possibleLink, undefined, 'a visit that was attached is not also a possible link')
+    })
+
+    it('uses the model of the call over the one of the engine', () => {
+      const { engine, visit } = makeEngine({ matchProbability: 0.5 })
+      for (let n = 1; n <= 5; n++) {
+        visit(device(n))
+      }
+      const partial: Features = { canvas: 'canvas2', userAgentVersion: 'ua2-v1' }
+      assert.equal(engine.resolve('t1', 'q1', partial, 5000, { learn: false }).matched, true)
+      const strict = { ...defaultModel(), matchProbability: 0.999999 }
+      assert.equal(engine.resolve('t1', 'q2', partial, 5000, { model: strict, learn: false }).matched, false)
+    })
   })
 })

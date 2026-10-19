@@ -3,10 +3,10 @@ import { createHash } from 'node:crypto'
 import type { Dataset, EvalEvent } from '../eval/dataset'
 import { seededRandom } from '../eval/stats'
 
-import { IdentityEngine } from './engine'
 import { extractFeatures, Features, featureNames } from './features'
 import { MemoryIdentityStore } from './memory_store'
 import { defaultModel, Model, probabilityOf } from './model'
+import { SyncIdentityEngine } from './sync_engine'
 
 /** Identifies a dataset by its visits, so that a model can tell later whether it is judged on its own training data */
 export function datasetId(dataset: Dataset): string {
@@ -179,7 +179,7 @@ export function collectCalibrationExamples(
   model: Model,
 ): Array<{ x: number; positive: boolean }> {
   let counter = 0
-  const engine = new IdentityEngine(new MemoryIdentityStore(), model, { newId: () => `v${++counter}` })
+  const engine = new SyncIdentityEngine(new MemoryIdentityStore(), model, { newId: () => `v${++counter}` })
   const labelOfDevice = new Map<string, string>()
   const examples: Array<{ x: number; positive: boolean }> = []
 

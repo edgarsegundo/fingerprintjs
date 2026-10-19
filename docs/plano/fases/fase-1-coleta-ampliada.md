@@ -1,6 +1,6 @@
 # Fase 1: coleta ampliada no cliente
 
-Status: concluída com ressalvas. Branch `fase-1-coleta-ampliada`, nada commitado.
+Status: concluída com ressalvas. Branch `v5.3.0-fork`, nada commitado.
 
 ## O que foi feito
 

@@ -1,6 +1,6 @@
 # Fase 0: harness de avaliação e coleta de dados rotulados
 
-Status: **código concluído com ressalvas; os dados reais ainda não existem.** Branch `fase-2-ingestao` (sem commit; as três fases estão no mesmo diretório de trabalho).
+Status: **código concluído com ressalvas; os dados reais ainda não existem.** Branch `v5.3.0-fork` (sem commit; as três fases estão no mesmo diretório de trabalho).
 
 A fase tem duas metades. A de código está pronta e testada. A de dados depende de pessoas reais e de um servidor
 alcançável, e só o dono do projeto pode fazê-la. **Nenhum número de precisão foi medido nesta fase.**
