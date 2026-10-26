@@ -60,6 +60,8 @@ export interface Settings {
       minLogOdds: number
       minFeatures: number
       maxLinks: number
+      merge: boolean
+      mergeMinLogOdds: number
     }
     person: {
       enabled: boolean

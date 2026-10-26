@@ -74,6 +74,12 @@ export interface Resolution {
    * machine as some of them in another browser. The identifiers stay separate: this is evidence for a person or a rule.
    */
   sameMachine?: SameMachine
+  /**
+   * Present (and true) when the visit took the visitor id of a device seen in another browser, because the tenant
+   * turned on `identity.sameMachine.merge` and the evidence was strong. `visitorId` is then that device, and `matched`
+   * is true. A person can undo it by splitting the visit off (`POST /v1/visitors/:id/split`).
+   */
+  mergedAcrossBrowsers?: true
 }
 
 /** A known device that is probably the same machine as the visit, seen in another browser. Evidence, never a merge. */

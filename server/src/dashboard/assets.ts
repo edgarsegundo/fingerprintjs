@@ -104,6 +104,10 @@ tbody tr { cursor: pointer; }
 tbody tr:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .low { color: var(--low); } .medium { color: var(--medium); } .high { color: var(--high); }
 .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+button.sp { margin-left: 4px; padding: 0 4px; border: 0; background: none; color: var(--muted); opacity: .65; font-size: 13px; line-height: 1; }
+button.sp:hover, button.sp:focus-visible { opacity: 1; color: var(--accent); }
+#tip { position: fixed; z-index: 10; max-width: 300px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--card); color: var(--fg); font-size: 12px; line-height: 1.4; white-space: normal; box-shadow: 0 2px 8px rgba(0,0,0,.18); pointer-events: none; }
 article { margin-top: 16px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
 article h2 { margin: 0 0 8px; font-size: 16px; }
 article h3 { margin: 16px 0 4px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
@@ -163,10 +167,51 @@ export const dashboardScript = `'use strict';
     return el('td', risk.score + ' ' + risk.level, risk.level)
   }
 
+  var reasons = {
+    linked_id: 'same account',
+    same_machine: 'same machine in another browser',
+    manual: 'confirmed by a person',
+    indirect: 'tied through another device'
+  }
+  var tip = null
+
+  function showTip(anchor, text) {
+    if (!tip) {
+      tip = el('div', null)
+      tip.id = 'tip'
+      tip.setAttribute('role', 'tooltip')
+      document.body.appendChild(tip)
+    }
+    tip.textContent = text
+    tip.hidden = false
+    var box = anchor.getBoundingClientRect()
+    tip.style.left = Math.max(8, Math.min(box.left, window.innerWidth - 316)) + 'px'
+    tip.style.top = (box.bottom + 6) + 'px'
+  }
+
+  function hideTip() { if (tip) { tip.hidden = true } }
+
+  /** A subtle mark next to a visitor that may be the same person as other visitors: it says why, and opens their visits */
+  function addSamePerson(cell, visit) {
+    ;(visit.samePerson || []).forEach(function (other) {
+      var label = 'Possibly the same person: ' + other.visitorId + ' (' + (reasons[other.why] || other.why) + '). Click to see its visits.'
+      var icon = el('button', '\u21C4', 'sp')
+      icon.type = 'button'
+      icon.setAttribute('aria-label', label)
+      icon.addEventListener('click', function (event) { event.stopPropagation(); hideTip(); showVisitor(other.visitorId) })
+      icon.addEventListener('mouseenter', function () { showTip(icon, label) })
+      icon.addEventListener('focus', function () { showTip(icon, label) })
+      icon.addEventListener('mouseleave', hideTip)
+      icon.addEventListener('blur', hideTip)
+      cell.appendChild(icon)
+    })
+  }
+
   function row(visit) {
     var tr = el('tr')
     tr.appendChild(el('td', when(visit.receivedAt)))
     var visitor = el('td', visit.visitorId ? visit.visitorId.slice(0, 10) : '-', 'mono')
+    addSamePerson(visitor, visit)
     tr.appendChild(visitor)
     tr.appendChild(el('td', visit.linkedId || '-'))
     tr.appendChild(el('td', visit.ip, 'mono'))
@@ -244,6 +289,7 @@ export const dashboardScript = `'use strict';
         var who = el('p')
         who.appendChild(el('span', identity.visitorId, 'mono'))
         who.appendChild(el('span', identity.matched ? ' - known device' : ' - new device'))
+        if (identity.mergedAcrossBrowsers) { who.appendChild(el('span', ' - took the id of the same machine in another browser')) }
         who.appendChild(el('span', identity.calibrated ? ' - probability ' + identity.probability : ' - not calibrated (provisional ' + identity.provisionalProbability + ')'))
         box.appendChild(who)
         var open = el('button', 'Show this visitor', 'link')

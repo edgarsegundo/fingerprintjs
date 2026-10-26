@@ -113,8 +113,12 @@ one or creates a new one. The browser never sees it; the backend of the customer
   that came from the same address as other devices a short while ago, and looks like the same machine as some of them
   seen only in other browsers, carries `identity.sameMachine.links` (each with the `visitorId`, the browsers, the machine
   features that agreed and the ones that differed). A crowded address gives `skipped: "shared_ip"` and no links. It is
-  evidence for a rule or a person, never a merge, and `logOdds` is provisional (not calibrated). The risk fact is
-  `identity.sameMachineCount`.
+  evidence for a rule or a person and `logOdds` is provisional (not calibrated). The risk fact is
+  `identity.sameMachineCount`. **By default nothing is merged.** A tenant that wants one visitor id per machine, in
+  every browser, turns on `identity.sameMachine.merge`: a visit that is not attached to a known device but reaches
+  `identity.sameMachine.mergeMinLogOdds` with a clear winner takes that device's `visitorId` and carries
+  `mergedAcrossBrowsers: true`. It joins identifiers (the costlier mistake), and a person can undo it by splitting the
+  visit off. Each visit in the list carries `samePerson`: up to three other visitors that may be the same person.
 - **Tampered visits.** `identity.learnFromTampered` decides whether a visit with evidence of tampering may teach the
   engine (`not_high` by default). The resolution says `learned: false` when it did not.
 - Limits: signals of the client cannot tell apart two physical devices that look identical; ids are not corrected afterwards

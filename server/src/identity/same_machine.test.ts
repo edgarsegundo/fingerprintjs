@@ -9,7 +9,12 @@ import { dropMysqlStorages, mysqlAvailable, newMysqlStorage } from '../testing/m
 import { IdentityEngine } from './engine'
 import { featureNames, Features, scopeOf } from './features'
 import { defaultModel } from './model'
-import { findSameMachine, SameMachineParams } from './same_machine'
+import {
+  defaultSameMachineParams as defaultParams0,
+  findSameMachine,
+  mergeTarget,
+  SameMachineParams,
+} from './same_machine'
 import type { DeviceProfile } from './store'
 
 const machine: Features = {
@@ -264,6 +269,81 @@ for (const [name, create] of implementations) {
       await storage.close()
     })
 
+    describe('taking the id of the other browser, when the tenant asked for it', () => {
+      const merge = { merge: true, mergeMinLogOdds: 4 }
+
+      it('gives the machine one id in both browsers, and learns both', async () => {
+        const { storage, engine } = await setup()
+        const first = await visit(storage, engine, { at: 1_000_000, features: chrome() })
+        const second = await visit(storage, engine, { at: 1_000_000 + minute, features: firefox(), sameMachine: merge })
+        assert.equal(second.visitorId, first.visitorId)
+        assert.equal(second.matched, true)
+        assert.equal(second.mergedAcrossBrowsers, true)
+        assert.equal(second.possibleLink, undefined, 'the device it took is not "a possible link" any more')
+        const profile = await storage.identity.getProfile('t', first.visitorId)
+        assert.deepEqual([...(profile?.features.get('browserFamily')?.keys() ?? [])].sort(), ['chrome', 'firefox'])
+        assert.equal((await storage.identity.getResolution('t', `r${counter}`))?.visitorId, first.visitorId)
+        const third = await visit(storage, engine, {
+          at: 1_000_000 + 2 * minute,
+          features: firefox(),
+          sameMachine: merge,
+        })
+        assert.equal(third.visitorId, first.visitorId, 'now the Firefox visit matches the device by itself')
+        assert.equal(third.mergedAcrossBrowsers, undefined)
+        await storage.close()
+      })
+
+      it('is off by default: the same visit keeps its own id', async () => {
+        const { storage, engine } = await setup()
+        const first = await visit(storage, engine, { at: 1_000_000, features: chrome() })
+        const second = await visit(storage, engine, { at: 1_000_000 + minute, features: firefox() })
+        assert.notEqual(second.visitorId, first.visitorId)
+        assert.equal(second.mergedAcrossBrowsers, undefined)
+        await storage.close()
+      })
+
+      it('needs the stronger bar, and a visit that may teach the engine', async () => {
+        const high = await setup()
+        await visit(high.storage, high.engine, { at: 1_000_000, features: chrome() })
+        const kept = await visit(high.storage, high.engine, {
+          at: 1_000_000 + minute,
+          features: firefox(),
+          sameMachine: { merge: true, mergeMinLogOdds: 50 },
+        })
+        assert.equal(kept.sameMachine?.links.length, 1, 'still linked')
+        assert.equal(kept.mergedAcrossBrowsers, undefined, 'but not joined')
+        await high.storage.close()
+
+        const untrusted = await setup()
+        await visit(untrusted.storage, untrusted.engine, { at: 1_000_000, features: chrome() })
+        const refused = await visit(untrusted.storage, untrusted.engine, {
+          at: 1_000_000 + minute,
+          features: firefox(),
+          learn: false,
+          sameMachine: merge,
+        })
+        assert.equal(refused.mergedAcrossBrowsers, undefined)
+        await untrusted.storage.close()
+      })
+
+      it('does not choose between two devices that fit about the same', async () => {
+        const { storage, engine } = await setup()
+        await visit(storage, engine, { at: 1_000_000, features: chrome() })
+        await visit(storage, engine, {
+          at: 1_000_000 + 10_000,
+          features: chrome({ webglRenderer: 'other-gpu', tlsCiphers: 'c-other', headerCore: 'h-other' }),
+        })
+        const third = await visit(storage, engine, {
+          at: 1_000_000 + minute,
+          features: firefox(),
+          sameMachine: { merge: true, mergeMinLogOdds: 0, minLogOdds: 0 },
+        })
+        assert.equal(third.sameMachine?.links.length, 2)
+        assert.equal(third.mergedAcrossBrowsers, undefined, 'a tie is not a winner')
+        await storage.close()
+      })
+    })
+
     it('does nothing when it is off', async () => {
       const { storage, engine } = await setup()
       await visit(storage, engine, { at: 1_000_000, features: chrome() })
@@ -327,6 +407,30 @@ describe('a store that cannot answer the same-machine question', () => {
   })
 })
 
+describe('mergeTarget', () => {
+  const link = (visitorId: string, logOdds: number) => ({
+    visitorId,
+    logOdds,
+    browsers: ['chrome'],
+    agree: [],
+    disagree: [],
+  })
+  const on = { ...defaultParams0, merge: true, mergeMinLogOdds: 6 }
+
+  it('takes the best link when it reaches the bar and wins by the margin', () => {
+    assert.equal(mergeTarget({ links: [link('a', 8)] }, on, 2), 'a')
+    assert.equal(mergeTarget({ links: [link('a', 8), link('b', 5)] }, on, 2), 'a')
+  })
+
+  it('takes nothing when it is off, below the bar, a tie, or a crowded address', () => {
+    assert.equal(mergeTarget({ links: [link('a', 8)] }, { ...on, merge: false }, 2), undefined)
+    assert.equal(mergeTarget({ links: [link('a', 5.9)] }, on, 2), undefined)
+    assert.equal(mergeTarget({ links: [link('a', 8), link('b', 7)] }, on, 2), undefined)
+    assert.equal(mergeTarget({ links: [], skipped: 'shared_ip' }, on, 2), undefined)
+    assert.equal(mergeTarget(undefined, on, 2), undefined)
+  })
+})
+
 describe('findSameMachine', () => {
   const profile = (deviceId: string, features: Record<string, string>): DeviceProfile => ({
     deviceId,
@@ -349,6 +453,8 @@ describe('findSameMachine', () => {
     minLogOdds: 4,
     minFeatures: 3,
     maxLinks: 3,
+    merge: false,
+    mergeMinLogOdds: 6,
   }
   const base = () => ({
     features: firefox(),

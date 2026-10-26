@@ -25,6 +25,8 @@ export interface VisitSummary {
   risk: { score: number; level: 'low' | 'medium' | 'high' } | null
   decision: string | null
   tamper: { high: number; medium: number; low: number } | null
+  /** Other visitors that may be the same person (at most 3), and how: linked_id, same_machine, manual, indirect */
+  samePerson: Array<{ visitorId: string; why: string }>
 }
 
 export interface EventPage {
@@ -69,8 +71,10 @@ export interface EventResult {
     provisionalProbability: number | null
     explanation: Explanation[]
     possibleLink?: { visitorId: string }
-    /** Devices that look like the same machine in another browser. Evidence only: the ids are not joined. */
+    /** Devices that look like the same machine in another browser. Evidence only, unless `mergedAcrossBrowsers`. */
     sameMachine?: { links: Array<{ visitorId: string; logOdds: number; browsers: string[] }>; skipped?: 'shared_ip' }
+    /** True when the tenant turned on `identity.sameMachine.merge` and this visit took the id of the other browser */
+    mergedAcrossBrowsers?: true
   } | null
   tamper: { signals: Array<{ id: string; severity: string; detail: string }>; counts: Record<string, number> } | null
   risk: {

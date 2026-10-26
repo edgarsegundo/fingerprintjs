@@ -77,6 +77,7 @@ interface PersonBlock {
 }
 
 interface EventView {
+  requestId: string
   identity: { visitorId: string; matched: boolean }
   person: PersonBlock | null
   risk: { factors: Array<{ id: string; weight: number }> } | null
@@ -276,6 +277,50 @@ describe('the person layer, through the server', () => {
       assert.deepEqual(third.person?.edges, [])
     } finally {
       await server.close()
+    }
+  })
+
+  it('shows, in the list of visits, the other visitors that may be the same person, and why', async () => {
+    const server = await startServer(config(), { port: 0 })
+    try {
+      const first = await eventOf(server, await visit(server, chrome('acct-A')))
+      await visit(server, firefox('acct-B'))
+      const list = (await (await get(server, '/v1/events?limit=10')).json()) as {
+        events: Array<{ visitorId: string; samePerson: Array<{ visitorId: string; why: string }> }>
+      }
+      const firefoxRow = list.events.find((row) => row.visitorId !== first.identity.visitorId)
+      assert.deepEqual(firefoxRow?.samePerson, [{ visitorId: first.identity.visitorId, why: 'same_machine' }])
+      const chromeRow = list.events.find((row) => row.visitorId === first.identity.visitorId)
+      assert.deepEqual(chromeRow?.samePerson.length, 1, 'the tie is the same seen from the other side')
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('keeps one id per browser unless the merge is on, and then gives one id to the machine', async () => {
+    const off = await startServer(config(), { port: 0 })
+    try {
+      const a = await eventOf(off, await visit(off, chrome('acct-A')))
+      const b = await eventOf(off, await visit(off, firefox('acct-A')))
+      assert.notEqual(b.identity.visitorId, a.identity.visitorId, 'by default: one id per browser')
+    } finally {
+      await off.close()
+    }
+    const on = await startServer(config({ identity: { sameMachine: { merge: true, mergeMinLogOdds: 4 } } }), {
+      port: 0,
+    })
+    try {
+      const a = await eventOf(on, await visit(on, chrome('acct-A')))
+      const b = await eventOf(on, await visit(on, firefox('acct-A')))
+      assert.equal(b.identity.visitorId, a.identity.visitorId, 'turned on: one id for the machine')
+      const identity = (await (await get(on, `/v1/events/${b.requestId}`)).json()) as {
+        identity: { mergedAcrossBrowsers?: boolean; matched: boolean }
+      }
+      assert.deepEqual([identity.identity.mergedAcrossBrowsers, identity.identity.matched], [true, true])
+      const person = await personOf(on, a.identity.visitorId)
+      assert.deepEqual(person.devices, [a.identity.visitorId], 'one device now')
+    } finally {
+      await on.close()
     }
   })
 })

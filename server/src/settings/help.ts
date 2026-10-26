@@ -120,6 +120,32 @@ export const parameterHelp: Record<string, ParameterHelp> = {
       'A precisão não foi medida com dados reais (Fase 0). O limiar é provisório (`identity.sameMachine.minLogOdds`).',
     flags: { preview: 'none' },
   },
+  'identity.sameMachine.merge': {
+    title: 'Usar o mesmo código em outro navegador',
+    summary: 'Faz a mesma máquina ter um único visitorId, mesmo em navegadores diferentes. Desligado por padrão.',
+    what: 'Por padrão cada navegador tem o seu `visitorId` e a mesma máquina só aparece como ligação ("Related devices"). Ligado, uma visita nova que a busca de mesma máquina aponta com evidência forte (acima de `mergeMinLogOdds`) e com um vencedor claro passa a **usar o `visitorId` do aparelho do outro navegador**, e o motor aprende os sinais dos dois navegadores nesse aparelho.\n\nÉ juntar identificadores: se duas pessoas com o mesmo modelo de computador usarem o mesmo Wi-Fi, podem virar um código só. Por isso exige o mesmo IP em poucos minutos, só aparelhos vistos em outro navegador, poucos aparelhos naquele IP e evidência acima da barra de ligar. A resposta traz `mergedAcrossBrowsers: true` para saber que isso aconteceu.',
+    raise: 'Não se aplica: é liga e desliga. A barra é `mergeMinLogOdds`.',
+    lower:
+      'Desligar volta a um código por navegador. O que já foi juntado continua junto; separe a visita no painel para desfazer.',
+    useCases: [
+      'Situação: quer contar pessoas e não navegadores, e aceita o risco de juntar quem divide o IP. Faça: ligue, suba `mergeMinLogOdds` e vigie as visitas com `mergedAcrossBrowsers`.',
+      'Situação: ainda não sabe a precisão. Faça: deixe desligado e use a ligação (ícone ao lado do Visitor) para decidir caso a caso.',
+    ],
+    caution:
+      'Sem dados reais rotulados (Fase 0) não existe número de precisão. Juntar duas pessoas é o erro mais caro (D78).',
+    whileCollecting: 'Desligado.',
+    flags: { attention: true, preview: 'none' },
+  },
+  'identity.sameMachine.mergeMinLogOdds': {
+    title: 'Evidência mínima para usar o mesmo código (log-odds)',
+    summary: 'A barra, mais alta que a de ligar, para uma visita usar o `visitorId` de outro navegador.',
+    what: 'Só vale com `identity.sameMachine.merge` ligado. Compara a evidência das características da máquina (a mesma soma de `minLogOdds`). Além da barra, o melhor aparelho precisa ganhar do segundo por `identity.ambiguityMargin`, senão a visita fica com o seu próprio código.',
+    raise: 'Junta menos e erra menos.',
+    lower: 'Junta mais; aumenta a chance de juntar computadores iguais de pessoas diferentes.',
+    useCases: ['Situação: viu duas pessoas com o mesmo código. Faça: suba o valor e separe a visita errada no painel.'],
+    caution: 'Valor provisório. Ajustar com dados sintéticos é proibido (D29, D30).',
+    flags: { preview: 'none' },
+  },
   'identity.sameMachine.windowMinutes': {
     title: 'Janela do mesmo endereço (minutos)',
     summary: 'Por quanto tempo o mesmo IP conta como "ao mesmo tempo" para achar a mesma máquina.',

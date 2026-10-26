@@ -509,6 +509,20 @@ export const parameters: Parameter[] = [
     description: 'O máximo de ligações de mesma máquina que uma visita recebe (as mais fortes primeiro).',
   },
   {
+    path: 'identity.sameMachine.merge',
+    kind: { type: 'boolean' },
+    default: false,
+    description:
+      'Desligado por padrão. Ligado, uma visita que não foi ligada a nenhum aparelho mas é quase certamente a MESMA MÁQUINA de um aparelho visto em outro navegador passa a usar o `visitorId` desse aparelho: um código só para a máquina, em qualquer navegador. Isso JUNTA identificadores, que é o erro mais caro (juntar duas pessoas), então exige `identity.sameMachine.mergeMinLogOdds` e um vencedor claro. Dá para desfazer pelo painel (separar a visita).',
+  },
+  {
+    path: 'identity.sameMachine.mergeMinLogOdds',
+    kind: { type: 'number', min: 0, max: 50 },
+    default: 6,
+    description:
+      'Evidência mínima, em log-odds, para uma visita usar o `visitorId` de outro navegador (precisa ser maior que `identity.sameMachine.minLogOdds`, que só liga). Valor PROVISÓRIO: sem dados reais rotulados não existe número de precisão.',
+  },
+  {
     path: 'identity.person.enabled',
     kind: { type: 'boolean' },
     default: true,

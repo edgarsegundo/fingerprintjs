@@ -49,6 +49,40 @@ export interface VisitSummary {
   risk: { score: number; level: string } | null
   decision: string | null
   tamper: { high: number; medium: number; low: number } | null
+  /**
+   * Other visitors that may be the same person (at most 3): the devices tied to this one by account, same machine or a
+   * person's decision. `why` is how: `linked_id`, `same_machine`, `manual`, or `indirect` (reached through another
+   * device). Empty when there are none or the person layer is off.
+   */
+  samePerson: Array<{ visitorId: string; why: string }>
+}
+
+const maxSamePerson = 3
+
+/** The other visitors that may be the same person as the visit's device (the person, and the same-machine link) */
+export function samePersonOf(resolution: Resolution | null, person: PersonView | null): VisitSummary['samePerson'] {
+  const self = resolution?.visitorId
+  if (!resolution || self === undefined) {
+    return []
+  }
+  const found = new Map<string, string>()
+  for (const edge of person?.edges ?? []) {
+    if (edge.a === self || edge.b === self) {
+      const other = edge.a === self ? edge.b : edge.a
+      found.set(other, found.get(other) ?? edge.kind)
+    }
+  }
+  for (const link of resolution.sameMachine?.links ?? []) {
+    if (link.visitorId !== self && !found.has(link.visitorId)) {
+      found.set(link.visitorId, 'same_machine')
+    }
+  }
+  for (const id of person?.devices ?? []) {
+    if (id !== self && !found.has(id)) {
+      found.set(id, 'indirect')
+    }
+  }
+  return [...found].slice(0, maxSamePerson).map(([visitorId, why]) => ({ visitorId, why }))
 }
 
 export function summarizeVisit(
@@ -67,6 +101,7 @@ export function summarizeVisit(
     risk: assessment.risk ? { score: assessment.risk.score, level: assessment.risk.level } : null,
     decision: assessment.decision?.action ?? null,
     tamper: assessment.tamper?.counts ?? null,
+    samePerson: samePersonOf(resolution, assessment.person),
   }
 }
 

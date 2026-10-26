@@ -7,6 +7,7 @@ import { defaultSettings } from '../settings/settings'
 import type { StoredEvent } from '../store/types'
 import type { TamperReport } from '../tamper/checks'
 
+import { samePersonOf } from './assess'
 import { behaviorOf, buildFacts, computeRisk, RiskInputs } from './risk'
 
 const settings = () => defaultSettings().risk
@@ -409,5 +410,61 @@ describe('buildFacts', () => {
       ],
       0.99,
     )
+  })
+})
+
+describe('samePersonOf', () => {
+  const link = (a: string, b: string, kind: 'linked_id' | 'same_machine' | 'manual') => ({
+    a: a < b ? a : b,
+    b: a < b ? b : a,
+    kind,
+    strength: 1,
+    firstSeen: 1,
+    lastSeen: 1,
+    days: 1,
+    status: 'auto' as const,
+  })
+  const person = (devices: string[], edges: ReturnType<typeof link>[]) => ({
+    devices,
+    edges,
+    evidence: [],
+    truncated: false,
+    linkedIds: [],
+    evidenceDevices: [],
+  })
+  const me = resolution({ visitorId: 'm' })
+
+  it('names the devices tied to this one and how, and calls the rest indirect', () => {
+    const result = samePersonOf(
+      me,
+      person(['m', 'b', 'a'], [link('m', 'b', 'linked_id'), link('a', 'b', 'same_machine')]),
+    )
+    assert.deepEqual(result, [
+      { visitorId: 'b', why: 'linked_id' },
+      { visitorId: 'a', why: 'indirect' },
+    ])
+  })
+
+  it('adds the same-machine link of the visit that the person layer lacks, never itself, at most three', () => {
+    const linked = resolution({
+      visitorId: 'm',
+      sameMachine: {
+        links: ['m', 'p', 'q', 'r', 's'].map((visitorId) => ({
+          visitorId,
+          logOdds: 5,
+          browsers: ['chrome'],
+          agree: [],
+          disagree: [],
+        })),
+      },
+    })
+    const result = samePersonOf(linked, null)
+    assert.deepEqual(
+      result.map((item) => item.visitorId),
+      ['p', 'q', 'r'],
+    )
+    assert.ok(result.every((item) => item.why === 'same_machine'))
+    assert.deepEqual(samePersonOf(null, null), [])
+    assert.deepEqual(samePersonOf(me, person(['m'], [])), [])
   })
 })

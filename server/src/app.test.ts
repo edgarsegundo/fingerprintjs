@@ -934,6 +934,7 @@ describe('visitor identification', () => {
           'receivedAt',
           'requestId',
           'risk',
+          'samePerson',
           'tamper',
           'visitorId',
         ])

@@ -4,7 +4,7 @@ import { decide, EngineOptions, ResolveParams, Settled, settle } from './decisio
 import { mergeProfiles, Observation, profileOf, withoutObservations } from './edit'
 import type { Features } from './features'
 import type { Model, PopulationStats } from './model'
-import { findSameMachine } from './same_machine'
+import { findSameMachine, mergeTarget } from './same_machine'
 import type { Activity, ActivityQuery, FeatureAnonymity, IdentityStore, Resolution } from './store'
 
 export type { EngineOptions, ResolveParams } from './decision'
@@ -242,15 +242,28 @@ export class IdentityEngine {
       const sameMachine = settings.learn
         ? await this.sameMachine(tenantId, features, visitorId, at, settings, population).catch(() => undefined)
         : undefined
-      const answer = sameMachine ? { ...resolution, sameMachine } : resolution
+      const target =
+        matched || !settings.learn
+          ? undefined
+          : mergeTarget(sameMachine, settings.sameMachine, settings.ambiguityMargin)
+      const finalId = target ?? visitorId
+      const answer: Resolution = { ...resolution, ...(sameMachine ? { sameMachine } : {}) }
+      if (target) {
+        // Taking the id of the other device: the device that the visit was refused is no longer a "possible link"
+        delete answer.possibleLink
+        answer.visitorId = target
+        answer.matched = true
+        answer.ambiguous = false
+        answer.mergedAcrossBrowsers = true
+      }
       if (settings.learn) {
-        if (matched) {
-          await this.store.addObservation(tenantId, visitorId, features, at)
+        if (matched || target) {
+          await this.store.addObservation(tenantId, finalId, features, at)
         } else {
           await this.store.createDevice(tenantId, visitorId, features, at)
         }
       }
-      await this.store.saveResolution(tenantId, requestId, visitorId, answer)
+      await this.store.saveResolution(tenantId, requestId, finalId, answer)
       return answer
     })
   }

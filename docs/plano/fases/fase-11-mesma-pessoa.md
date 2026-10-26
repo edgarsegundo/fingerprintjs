@@ -41,3 +41,9 @@ Parâmetros novos (todos com ajuda em `help.ts`): `identity.sameMachine.{enabled
 - **Revisão jurídica pendente:** a camada de pessoa liga aparelhos de pessoas e está ligada por padrão (decisão do dono). Entrou o risco R18; a LIA e o RIPD (`privacidade/`) precisam dela antes de produção.
 - Ficaram de fora: `personId` estável (de propósito, seria um identificador novo), ligações na exportação do titular, ligações na lista do painel e nos webhooks, e as métricas de avaliação por par em dois navegadores no harness da Fase 0.
 - `delete-linked` (CLI) ainda não apaga entregas de webhook nem contribuições ao grafo, ao contrário da API (achado nesta investigação, não corrigido aqui).
+
+## Adendo: um `visitorId` por máquina, opcional (D105)
+
+Pedido do dono depois do deploy: o `visitorId` continuava diferente em cada navegador, que era o padrão de propósito. Entrou `identity.sameMachine.merge` (**desligado por padrão**) e `identity.sameMachine.mergeMinLogOdds` (6, provisório). Ligado, a visita usa o `visitorId` do outro navegador só com evidência acima da barra e um vencedor claro (`mergeTarget`, `identity/same_machine.ts`). Também entrou `samePerson` em cada visita da lista e o ícone discreto (⇄) na coluna Visitor, com dica e link.
+
+Verificado: 933 testes sem MySQL e 1052 com MySQL real; mutação nas três defesas (ligar mesmo desligado, barra, vencedor claro) e em `samePerson`; ícone, dica, clique e o clique não abrir o detalhe da linha, num Chrome real. A guarda de `learn` em `mergeTarget` é redundante com a da passada de mesma máquina, de propósito.

@@ -15,6 +15,14 @@ export interface SameMachineParams {
   minFeatures: number
   /** The most links that one visit gets */
   maxLinks: number
+  /**
+   * Off by default. On, a visit that is not attached to a known device but is very probably the same machine as one
+   * seen in another browser takes THAT device's visitor id: one id for the machine whatever the browser. It joins
+   * identifiers, which is the costlier mistake (D78), so it needs the stronger bar below and a clear winner.
+   */
+  merge: boolean
+  /** The least evidence, in log-odds, to take the other device's id. Above `minLogOdds`. Provisional. */
+  mergeMinLogOdds: number
 }
 
 export const defaultSameMachineParams: SameMachineParams = {
@@ -24,6 +32,8 @@ export const defaultSameMachineParams: SameMachineParams = {
   minLogOdds: 4,
   minFeatures: 3,
   maxLinks: 3,
+  merge: false,
+  mergeMinLogOdds: 6,
 }
 
 const machineOnly = (features: Features): Features =>
@@ -109,4 +119,23 @@ export function findSameMachine(input: {
     .sort((a, b) => b.logOdds - a.logOdds || (a.visitorId < b.visitorId ? -1 : 1))
     .slice(0, params.maxLinks)
   return links.length === 0 ? undefined : { links }
+}
+
+/**
+ * The device whose visitor id the visit should take, when `merge` is on: the best same-machine link, if it reaches the
+ * stronger bar and beats the second one by the ambiguity margin. `undefined` otherwise, and the visit keeps its own id.
+ */
+export function mergeTarget(
+  sameMachine: SameMachine | undefined,
+  params: SameMachineParams,
+  ambiguityMargin: number,
+): string | undefined {
+  if (!params.merge || !sameMachine || sameMachine.links.length === 0) {
+    return undefined
+  }
+  const [best, second] = sameMachine.links
+  if (best.logOdds < params.mergeMinLogOdds) {
+    return undefined
+  }
+  return second !== undefined && best.logOdds - second.logOdds < ambiguityMargin ? undefined : best.visitorId
 }

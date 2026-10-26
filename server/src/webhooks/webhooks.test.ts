@@ -76,6 +76,7 @@ describe('webhook endpoints', () => {
       risk: risk === null ? null : { score: risk, level: 'low' },
       decision,
       tamper: null,
+      samePerson: [],
     })
     const endpoint = (extra: Partial<WebhookEndpoint>): WebhookEndpoint => ({
       ...normalizeEndpoints([goodEndpoint])[0],
