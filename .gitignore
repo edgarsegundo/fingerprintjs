@@ -22,3 +22,6 @@
 .idea/
 .vscode/
 yarn-error.log
+
+.env.example
+.env
