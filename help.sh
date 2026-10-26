@@ -29,13 +29,47 @@ load_env() {
 # MYSQL_PWD so it does not show up in the process list.
 mysql_run() {
   load_env || return 1
-  local pass="${MYSQL_USERPASS//\"/}" # remove aspas, se houver
+  local pass
+  pass="$(db_password)"
   if [ -z "$pass" ]; then
-    echo "Erro: MYSQL_USERPASS está vazio no .env."
+    echo "Erro: nem FP_MYSQL_PASSWORD nem MYSQL_USERPASS estão preenchidos no .env."
     return 1
   fi
   { echo "SET time_zone = '+00:00';"; cat; } |
     docker exec -i -e MYSQL_PWD="$pass" mysql mysql -u"$DB_USER" -t --default-character-set=utf8mb4 "$DB_NAME"
+  local status=$?
+  if [ $status -ne 0 ]; then
+    echo "Dica: se deu 'Access denied', a senha do .env não é a do usuário $DB_USER do MySQL (a mesma FP_MYSQL_PASSWORD" \
+      "do .env do reverse-proxy-config)."
+  fi
+  return $status
+}
+
+# The password of the fp user: FP_MYSQL_PASSWORD (the one the server uses) wins over MYSQL_USERPASS.
+db_password() {
+  local value="${FP_MYSQL_PASSWORD:-$MYSQL_USERPASS}"
+  printf '%s' "${value//\"/}" # remove aspas, se houver
+}
+
+# Prints the dashboard address and the secret key of a tenant, to copy into the page. The key comes from the .env as
+# FP_SK_<TENANT> (upper case, "-" as "_"), for example FP_SK_PWA.
+dashboard_key() {
+  load_env || return 1
+  read -r -p "Tenant [pwa]: " answer
+  local tenant="${answer:-pwa}"
+  if ! [[ "$tenant" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
+    echo "Tenant inválido."
+    return 1
+  fi
+  local var="FP_SK_$(printf '%s' "$tenant" | tr 'a-z-' 'A-Z_')"
+  local key="${!var}"
+  if [ -z "$key" ]; then
+    echo "Não achei $var no .env. Acrescente uma linha:  $var=sk_..."
+    return 1
+  fi
+  echo "Painel: https://id.empregoaqui.com.br:8443/dashboard/"
+  echo "Chave secreta do tenant $tenant (cole no campo e clique em Connect):"
+  echo "$key"
 }
 
 # ---- Statistics -------------------------------------------------------------------------------------------------
@@ -493,15 +527,16 @@ while true; do
   echo "4) Quem não alcançou o servidor (porta bloqueada, bloqueadores)"
   echo "5) Saúde: containers, certificado, disco, tamanho do banco"
   echo "6) Logs do servidor"
+  echo "7) Chave do painel (copiar e colar em /dashboard/)"
   echo "q) Sair"
   read -r -p "Choose an option: " opt
   echo "..."
   case $opt in
     1)
       if load_env; then
-        DB_PASSWORD="${MYSQL_USERPASS//\"/}" # remove aspas, se houver
+        DB_PASSWORD="$(db_password)"
         if [ -z "$DB_PASSWORD" ]; then
-          echo "Erro: MYSQL_USERPASS está vazio no .env."
+          echo "Erro: nem FP_MYSQL_PASSWORD nem MYSQL_USERPASS estão preenchidos no .env."
         else
           echo "Conectando ao MySQL no Docker..."
           docker exec -it -e MYSQL_PWD="$DB_PASSWORD" mysql mysql -u"$DB_USER" "$DB_NAME"
@@ -513,6 +548,7 @@ while true; do
     4) reachability ;;
     5) health ;;
     6) logs ;;
+    7) dashboard_key ;;
     q|Q) exit 0 ;;
     *) echo "Invalid option." ;;
   esac
