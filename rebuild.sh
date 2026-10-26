@@ -77,10 +77,16 @@ if [ "$RESTART" = 1 ]; then
   fi
   # shellcheck disable=SC2086
   docker compose up -d --force-recreate $services
-  sleep 15
+  sleep 20
+  latest_image="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
   for s in $services; do
     printf '%s: ' "$s"
     docker inspect --format '{{.State.Health.Status}}' "$s"
+    if [ "$(docker inspect --format '{{.Image}}' "$s")" = "$latest_image" ]; then
+      echo "  usa a imagem nova"
+    else
+      echo "  ATENÇÃO: $s NÃO está com a imagem recém-construída" >&2
+    fi
   done
 fi
 
