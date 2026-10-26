@@ -21,10 +21,9 @@ die() { echo "$1" >&2; exit 1; }
 
 sudo test -f "$CONFIG" || die "$CONFIG não existe."
 docker ps --format '{{.Names}}' | grep -qx "$CONTAINER" || die "O container $CONTAINER não está em execução."
-# The command ends with an error when it has no --config, so its exit status says nothing here (and "pipefail" would turn
-# it into a failure of the check). Only the text tells: the usage of an image without the command never names it.
-help_text="$(docker exec "$CONTAINER" node dist/cli.js import-tenants --help 2>&1 || true)"
-printf '%s' "$help_text" | grep -q "import-tenants" ||
+# Only looks at the code of the container. Do NOT run the command to test it: the container has FP_CONFIG set, so
+# "import-tenants --help" would not show help, it would run the import.
+docker exec "$CONTAINER" grep -q "import-tenants" dist/cli.js ||
   die "O container não conhece import-tenants. Rode ./rebuild.sh primeiro."
 
 has_admin_key="$(sudo docker run --rm -v "$CONFIG_DIR":/config:ro "$IMAGE" node -e \
