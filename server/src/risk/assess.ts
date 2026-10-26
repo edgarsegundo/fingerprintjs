@@ -5,6 +5,9 @@ import type { IdentityEngine } from '../identity/engine'
 import { extractFeatures, featureInputOf } from '../identity/features'
 import type { Activity, Resolution } from '../identity/store'
 import type { TimezoneCountries } from '../net/timezones'
+import type { PersonView } from '../person/cluster'
+import type { PersonStore } from '../person/store'
+import { personView } from '../person/view'
 import type { Settings } from '../settings/settings'
 import type { StoredEvent } from '../store/types'
 import { checkTamper, TamperReport } from '../tamper/checks'
@@ -17,6 +20,8 @@ export interface AssessDeps {
   timezones?: TimezoneCountries
   /** The shared graph, when it is turned on in the configuration */
   graph?: { store: GraphStore; secret: string; minTenants: number; retentionDays: number }
+  /** The ties between devices. Without them there is no person. */
+  person?: PersonStore
 }
 
 /** What the server concludes about a stored visit. Each part is `null` when the tenant turned it off. */
@@ -28,6 +33,8 @@ export interface Assessment {
   decision: Decision | null
   /** What other tenants saw. `null` unless this tenant takes part. A count is `null` if too few are behind it. */
   graph: { tenants: number | null; flaggedTenants: number | null } | null
+  /** The devices tied to this one. `null` when the tenant turned the person layer off. */
+  person: PersonView | null
 }
 
 /** A visit in a list: enough to scan many of them, without the whole payload */
@@ -101,6 +108,28 @@ async function graphView(
   }
 }
 
+/** The person that the device of the visit belongs to, or `null` if the layer is off for the tenant or unreadable */
+async function personFor(
+  deps: AssessDeps,
+  settings: Settings,
+  tenantId: string,
+  resolution: Resolution | null,
+): Promise<PersonView | null> {
+  if (!deps.person || !deps.identity || !resolution || !settings.identity.person.enabled) {
+    return null
+  }
+  try {
+    return await personView(
+      { person: deps.person, identity: deps.identity },
+      tenantId,
+      resolution.visitorId,
+      settings.identity.person,
+    )
+  } catch {
+    return null // extra evidence: reading the visit must not fail because of it
+  }
+}
+
 /** The evidence of tampering with the tenant's settings applied, or `null` if the tenant turned it off */
 export function tamperFor(event: StoredEvent, settings: Settings): TamperReport | null {
   return settings.tamper.enabled
@@ -147,6 +176,7 @@ export async function assess(
     }
   }
   const graph = await graphView(deps, settings, event)
+  const person = await personFor(deps, settings, event.tenantId, resolution)
   const inputs = {
     event,
     tamper,
@@ -156,8 +186,9 @@ export async function assess(
     ipActivity,
     timezones: deps.timezones,
     graph,
+    person: person ?? undefined,
   }
   const risk = settings.risk.enabled ? computeRisk(inputs, settings.risk) : null
   const decision = evaluateRules(settings.rules.list, buildFacts(inputs, risk), settings.rules.defaultDecision)
-  return { tamper, environment, risk, decision, graph: graph ?? null }
+  return { tamper, environment, risk, decision, graph: graph ?? null, person }
 }

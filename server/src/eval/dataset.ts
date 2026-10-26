@@ -21,6 +21,8 @@ export interface EvalEvent {
     /** The unhashed lists behind the JA4 (ciphers, extensions, signature algorithms). Not personal data. */
     ja4r?: string
     headerFp?: string
+    /** The header names in the order received, so that `headerCore` can be computed from the dataset */
+    headerNames?: string[]
     http2Fp?: string
     viaProxy: boolean
     httpVersion: string
@@ -120,6 +122,7 @@ export function buildDataset(
         ja4: network.tls?.ja4,
         ja4r: network.tls?.ja4_r,
         headerFp: network.headers.fp,
+        headerNames: network.headers.order,
         http2Fp: network.http2?.fp,
         viaProxy: network.viaProxy,
         httpVersion: network.httpVersion,

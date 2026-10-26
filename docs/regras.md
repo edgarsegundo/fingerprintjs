@@ -41,6 +41,11 @@ Uma regra é dado, não código: não há `eval`, expressão regular nem laço. 
 | `identity.new` | boolean | O aparelho é novo (o oposto de `identity.matched`). |
 | `identity.ambiguous` | boolean | Outro aparelho conhecido era quase tão provável quanto o escolhido. |
 | `identity.possibleLink` | boolean | A visita lembra um aparelho conhecido sem ter chegado ao limiar de ligação. |
+| `identity.sameMachineCount` | number | Quantos aparelhos conhecidos parecem ser a mesma máquina desta visita em outro navegador (0 se nenhum). |
+| `person.devices` | number | Quantos aparelhos estão ligados a este (a pessoa), contando o próprio. Só existe com a camada de pessoa ligada. |
+| `person.linkedIds` | number | Quantas contas distintas (`linkedId`) os aparelhos da pessoa já usaram. É o sinal de várias contas da mesma pessoa. |
+| `person.evidenceDevices` | number | Quantos outros aparelhos estão ligados só por evidência (mesmo IP em horários próximos), sem fazer parte da pessoa. |
+| `person.truncated` | boolean | A pessoa passou do máximo de aparelhos e foi cortada: não use `person.*` para decidir nada. |
 | `identity.storedIdConflict` | boolean | Verdadeiro se a visita trouxe o código guardado de um aparelho conhecido mas discorda dele no que não muda (placa de vídeo, tela): sinal de que o código foi copiado para outra máquina. |
 | `identity.learned` | boolean | A visita pôde ensinar o motor (veja `identity.learnFromTampered`). |
 | `identity.probability` | number | Probabilidade da ligação. **Só existe com modelo calibrado**; antes disso o campo está ausente, de propósito. |

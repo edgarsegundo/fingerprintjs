@@ -1,5 +1,6 @@
 import type { Config } from '../config'
 import type { Volatility } from '../identity/features'
+import type { LinkKind } from '../person/store'
 import type { IpStorage } from '../privacy/ip_policy'
 import type { Rule } from '../risk/rules'
 import type { Severity } from '../tamper/checks'
@@ -52,6 +53,21 @@ export interface Settings {
     possibleLinkProbability: number | null
     storedId: { enabled: boolean; bases: string[]; maxAgeDays: number }
     storedIdConflictThreshold: number
+    sameMachine: {
+      enabled: boolean
+      windowMinutes: number
+      maxDevicesPerIp: number
+      minLogOdds: number
+      minFeatures: number
+      maxLinks: number
+    }
+    person: {
+      enabled: boolean
+      groupingKinds: LinkKind[]
+      maxDevices: number
+      networkWindowMinutes: number
+      networkMaxDevicesPerIp: number
+    }
     maxCandidates: number
     candidateMaxShare: number
     candidateMinDevices: number
@@ -76,6 +92,9 @@ export interface Settings {
     tamperWeights: Record<Severity, number>
     timezoneMismatchWeight: number
     possibleLinkWeight: number
+    sameMachineWeight: number
+    multiAccountWeight: number
+    multiAccountThreshold: number
     fakeCrawlerWeight: number
     environmentWeights: Record<string, number>
     storedIdConflictWeight: number

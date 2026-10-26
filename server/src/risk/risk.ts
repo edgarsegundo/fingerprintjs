@@ -1,6 +1,7 @@
 import type { EnvironmentReport } from '../environment/checks'
 import type { Activity, Resolution } from '../identity/store'
 import { TimezoneCountries, zoneFitsCountry } from '../net/timezones'
+import type { PersonView } from '../person/cluster'
 import type { Settings } from '../settings/settings'
 import type { StoredEvent } from '../store/types'
 import type { TamperReport } from '../tamper/checks'
@@ -40,6 +41,8 @@ export interface RiskInputs {
   timezones?: TimezoneCountries
   /** What other tenants saw, if this tenant takes part in the shared graph and enough tenants are behind the counts */
   graph?: { tenants: number | null; flaggedTenants: number | null }
+  /** The devices that this one is tied to. `undefined` when the tenant turned the person layer off. */
+  person?: PersonView
 }
 
 function timezoneOf(event: StoredEvent): string | undefined {
@@ -142,6 +145,26 @@ export function computeRisk(inputs: RiskInputs, settings: Settings['risk']): Ris
       'possible_link',
       settings.possibleLinkWeight,
       'The visit looks like a known device but not enough to be attached to it.',
+    )
+  }
+  if (inputs.resolution?.sameMachine?.links.length) {
+    add(
+      'same_machine_other_browser',
+      settings.sameMachineWeight,
+      'The visit looks like the same machine as a device seen in another browser.',
+    )
+  }
+  // One device with many accounts is the velocity factor already; this one is for accounts spread over several devices
+  if (
+    inputs.person &&
+    !inputs.person.truncated &&
+    inputs.person.devices.length > 1 &&
+    settings.multiAccountThreshold <= inputs.person.linkedIds.length
+  ) {
+    add(
+      'multi_account',
+      settings.multiAccountWeight,
+      `The devices tied to this one used ${inputs.person.linkedIds.length} accounts.`,
     )
   }
   if (inputs.graph?.flaggedTenants) {
@@ -260,11 +283,18 @@ export function buildFacts(inputs: RiskInputs, risk: RiskReport | null): Facts {
     facts['identity.new'] = !resolution.matched
     facts['identity.ambiguous'] = resolution.ambiguous
     facts['identity.possibleLink'] = resolution.possibleLink !== undefined
+    facts['identity.sameMachineCount'] = resolution.sameMachine?.links.length ?? 0
     facts['identity.storedIdConflict'] = resolution.storedIdConflict === true
     facts['identity.learned'] = resolution.learned
     if (resolution.probability !== null) {
       facts['identity.probability'] = resolution.probability
     }
+  }
+  if (inputs.person) {
+    facts['person.devices'] = inputs.person.devices.length
+    facts['person.linkedIds'] = inputs.person.linkedIds.length
+    facts['person.evidenceDevices'] = inputs.person.evidenceDevices.length
+    facts['person.truncated'] = inputs.person.truncated
   }
   if (inputs.graph?.tenants !== undefined && inputs.graph.tenants !== null) {
     facts['graph.tenants'] = inputs.graph.tenants

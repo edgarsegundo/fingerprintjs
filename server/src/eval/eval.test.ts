@@ -3,10 +3,10 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 
+import { browserOf } from '../net/browser'
 import type { NetworkSignals } from '../net/signals'
 import type { StoredEvent } from '../store/types'
 
-import { browserOf } from './browser'
 import { buildDataset, EvalEvent, parseDataset, serializeDataset } from './dataset'
 import { buildPairs } from './pairs'
 import { buildReport, renderMarkdown } from './report'

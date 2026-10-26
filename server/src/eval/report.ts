@@ -1,4 +1,5 @@
-import { browserOf } from './browser'
+import { browserOf } from '../net/browser'
+
 import { Dataset, DatasetMeta, EvalEvent } from './dataset'
 import { legacyVisitorId } from './legacy'
 import { buildPairs, Pair, PairOptions } from './pairs'

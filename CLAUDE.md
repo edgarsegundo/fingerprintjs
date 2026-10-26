@@ -17,8 +17,8 @@ O cliente coleta sinais crus e o servidor decide quem é o visitante. O plano co
 
 ## Onde estamos
 
-Veja a tabela de status no [roadmap](docs/plano/roadmap.md). Resumo em 2026-10-19: **todas as fases do plano têm código e
-testes** (0 a 10, a camada SaaS e o mecanismo do grafo compartilhado, que está **desligado e travado**). A fase 10 reúne tudo que
+Veja a tabela de status no [roadmap](docs/plano/roadmap.md). Resumo em 2026-10-26: **todas as fases do plano têm código e
+testes** (0 a 11, a camada SaaS e o mecanismo do grafo compartilhado, que está **desligado e travado**). A fase 10 reúne tudo que
 dava para fazer sem dados reais ([relatório](docs/plano/fases/fase-10-sem-dados.md)). O que falta não é código:
 
 - **Dados reais da Fase 0** (só o dono recruta voluntários): sem eles não existe número de precisão, os parâmetros do motor
@@ -34,7 +34,7 @@ dava para fazer sem dados reais ([relatório](docs/plano/fases/fase-10-sem-dados
 - **Pesquisa** (`docs/plano/01-pesquisa-e-fontes.md`) foi mais rasa que o pedido original: cerca de 30 buscas.
 
 Documentos do plano: `01-pesquisa-e-fontes`, `02-inventario-de-capacidades`, `03-ideias-inovadoras`,
-`05-riscos-privacidade-e-compliance`, `06-fechamento-e-autocritica` (comece por este), `decisoes.md` (D1 a D95), relatórios em `docs/plano/fases/`.
+`05-riscos-privacidade-e-compliance`, `06-fechamento-e-autocritica` (comece por este), `decisoes.md` (D1 a D104), relatórios em `docs/plano/fases/`.
 Para evoluir a busca de candidatos quando houver dados reais: `busca-de-candidatos-v2-como-evoluir-com-dados-reais`.
 Para vender a vários clientes (domínio do cliente, CNAME, SNI): `vender-para-varios-clientes-dominio-do-cliente-cname-subdominio-first-party-ja4-sni-certificado-por-cliente-proxy-do-cliente`.
 Para instalar na VPS (`id.empregoaqui.com.br`, passo a passo): `instalar-na-vps-passo-a-passo-id-empregoaqui-com-br-docker-tls-mysql-certificado-letsencrypt-coletor-no-pwa-fase-de-observacao`.
@@ -51,7 +51,8 @@ Para a decisão do banco e os cuidados em produção: `mysql-ou-sqlite-decisao-e
 | `src/loader/` | Carregador (`dist/fp-loader.min.js`, global `FpLoader`): serve do site do cliente, carrega o coletor e avisa quando ele não é alcançado. |
 | `server/` | Servidor de ingestão (Fase 2), TypeScript para Node 22, sem dependência de execução com SQLite; o MySQL (banco de produção, D79) usa só o driver opcional `mysql2`. Veja `server/README.md`. |
 | `server/src/net/`, `tls/`, `ingest/`, `store/` | Sinais de rede (IP, cabeçalhos, HTTP/2), JA4 e front TLS, validação e nonce, armazenamento. |
-| `server/src/identity/` | Motor de matching (Fase 3): características, modelo, motor, armazenamento, ajuste. |
+| `server/src/identity/` | Motor de matching (Fase 3): características (cada uma com `scope`: máquina, navegador ou rede), modelo, motor, armazenamento, ajuste, e a passada de mesma máquina em outro navegador (`same_machine.ts`, D103). |
+| `server/src/person/` | Camada de pessoa (Fase 11, D104): ligações entre aparelhos do tenant (`identity_links`), a pessoa calculada na leitura (`cluster.ts`), o gravador por visita (`linker.ts`). Rede e `possible_link` só são evidência. |
 | `server/src/settings/` | Configuração: tabela única de parâmetros, camadas, validação, recarga, referência gerada (`docs/configuracao.md`). `help.ts` (explicação longa de cada parâmetro, vista no painel), `help_pending.ts` (os que faltam; só encolhe), `catalog.ts` e `tenant_view.ts` (o que o painel lê). |
 | `server/src/dashboard/` | Painel de visitas (`assets.ts`, chave `sk_`) e painel de configuração (`config_assets.ts`, `/dashboard/config`, chave de operador `adm_`). HTML/CSS/JS embutidos, CSP estrita, sem `innerHTML`. |
 | `server/src/webhooks/`, `sdk/`, `dashboard/` | Entrega de webhooks (fila, assinatura, rede segura), SDK de Node e painel (Fase 6). |
@@ -90,6 +91,7 @@ node server/dist/cli.js eval dataset.jsonl --out relatorio.md      # precisa de 
 node server/dist/cli.js fit-model dataset.jsonl --out model.json   # aprende os parâmetros (precisa de centenas de aparelhos)
 node server/dist/cli.js eval-identity dataset.jsonl --model model.json   # motor contra o hash original, em ordem de tempo
 node server/dist/cli.js last-events --config cfg.json --tenant <id>   # últimas visitas e o IP que o servidor viu
+node server/dist/cli.js feature-stability --config cfg.json --tenant <id>   # quais características mudam no mesmo aparelho (também na opção 17 do help.sh)
 node server/dist/cli.js reachability-receiver --db reach.db --port 8090 --allowed-origin https://app.exemplo.com   # recebe os avisos do carregador (coletor inalcançável); não grava IP
 node server/dist/cli.js reachability-summary --db reach.db --days 30   # resumo desses avisos, em português
 node server/dist/cli.js migrate-sqlite --from events.db --config cfg-mysql.json   # copia um SQLite para o MySQL e confere

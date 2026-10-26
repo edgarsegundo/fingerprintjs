@@ -17,7 +17,11 @@ export function datasetId(dataset: Dataset): string {
 const byTime = (a: EvalEvent, b: EvalEvent) => a.receivedAt - b.receivedAt || (a.requestId < b.requestId ? -1 : 1)
 
 const featuresOf = (event: EvalEvent): Features =>
-  extractFeatures({ components: event.components, extended: event.extended, network: event.network })
+  extractFeatures({
+    components: event.components,
+    extended: event.extended,
+    network: { ...event.network, userAgent: event.userAgent },
+  })
 
 export interface FeatureEstimate {
   /** Comparisons where the visit and the device history both had the feature */

@@ -253,6 +253,8 @@ export const dashboardScript = `'use strict';
         list(box, identity.explanation, function (item) {
           return el('li', item.outcome + ' ' + item.feature + ' (weight ' + Number(item.weight).toFixed(2) + ', without it ' + Number(item.probabilityWithoutIt).toFixed(3) + ')')
         })
+        addRelated(box, identity)
+        addPerson(box, requestId, identity.visitorId)
         addCorrections(box, requestId, identity.visitorId)
       } else { box.appendChild(el('p', 'Turned off.')) }
 
@@ -263,6 +265,78 @@ export const dashboardScript = `'use strict';
       status('')
       box.scrollIntoView()
     }).catch(function (error) { status(error.message, true) })
+  }
+
+  /** The other devices that this visit points to: the closest one that was not joined, and the same machine in other browsers */
+  function addRelated(box, identity) {
+    var related = []
+    if (identity.possibleLink) {
+      related.push({
+        id: identity.possibleLink.visitorId,
+        text: 'Possible link: the closest device, not close enough to join (log-odds ' + Number(identity.possibleLink.logOdds).toFixed(2) + ').'
+      })
+    }
+    var machine = identity.sameMachine
+    if (machine && machine.links) {
+      machine.links.forEach(function (link) {
+        related.push({
+          id: link.visitorId,
+          text: 'Same machine in another browser (' + link.browsers.join(', ') + '): log-odds ' + Number(link.logOdds).toFixed(2) +
+            ', agree on ' + link.agree.join(', ') + (link.disagree.length ? '; differ on ' + link.disagree.join(', ') : '') + '. Evidence only: not joined.'
+        })
+      })
+    }
+    var crowded = machine && machine.skipped === 'shared_ip'
+    if (related.length === 0 && !crowded) { return }
+    box.appendChild(el('h3', 'Related devices'))
+    if (crowded) {
+      box.appendChild(el('p', 'Not checked for the same machine: too many devices shared this address a short while ago.', 'muted'))
+    }
+    list(box, related, function (item) {
+      var li = el('li')
+      var open = el('button', item.id, 'link mono')
+      open.type = 'button'
+      open.addEventListener('click', function () { showVisitor(item.id) })
+      li.appendChild(open)
+      li.appendChild(el('span', ' ' + item.text))
+      return li
+    })
+  }
+
+  /** The person that this device belongs to: its devices, the accounts they used, and how each tie came about */
+  function addPerson(box, requestId, visitorId) {
+    var section = el('div')
+    box.appendChild(section)
+    api('/v1/visitors/' + encodeURIComponent(visitorId) + '/person').then(function (person) {
+      section.appendChild(el('h3', 'Person'))
+      var others = person.devices.filter(function (id) { return id !== visitorId }).concat(person.evidenceDevices)
+      section.appendChild(el('p', person.devices.length + ' device(s), ' + person.linkedIds.length + ' account(s)' +
+        (person.linkedIds.length ? ': ' + person.linkedIds.join(', ') : '') + (person.truncated ? ' (cut short: too many devices)' : '') + '.'))
+      var kindsOf = function (id) {
+        return person.edges.concat(person.evidence).filter(function (tie) { return tie.a === id || tie.b === id })
+      }
+      if (others.length === 0) { section.appendChild(el('p', 'No other device is tied to this one.', 'muted')); return }
+      section.appendChild(el('p', 'A tie by account, same machine or a person groups devices; the same address only shows as evidence. A person decides.', 'muted'))
+      list(section, others, function (id) {
+        var li = el('li')
+        var open = el('button', id, 'link mono')
+        open.type = 'button'
+        open.addEventListener('click', function () { showVisitor(id) })
+        li.appendChild(open)
+        li.appendChild(el('span', ' ' + kindsOf(id).map(function (tie) { return tie.kind + (tie.status !== 'auto' ? ' (' + tie.status + ')' : '') }).join(', ') + ' '))
+        var decide = function (decision, label) {
+          return confirmed(label, function () {
+            api('/v1/visitors/' + encodeURIComponent(visitorId) + '/links', { method: 'POST', body: JSON.stringify({ with: id, decision: decision }) })
+              .then(function () { status('Saved.'); showEvent(requestId) })
+              .catch(function (error) { status(error.message, true) })
+          })
+        }
+        li.appendChild(decide('confirm', 'Same person'))
+        li.appendChild(decide('reject', 'Not the same person'))
+        li.appendChild(decide('clear', 'Undo'))
+        return li
+      })
+    }).catch(function () { /* the person layer is off for this tenant, or it cannot be read: show nothing */ })
   }
 
   /** A button that asks for a second click before it acts: merging and splitting cannot be undone by the panel */

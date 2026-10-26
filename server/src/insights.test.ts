@@ -221,6 +221,31 @@ for (const [name, create] of stores) {
   })
 }
 
+for (const [name, create] of stores) {
+  describe(`featureStability (${name})`, () => {
+    after(dropMysqlStorages)
+
+    it('counts, per feature, the devices read at least twice that had more than one value', async () => {
+      const store = await create()
+      await store.createDevice('t', 'steady', { gpu: 'a', zone: 'x' }, 1)
+      await store.addObservation('t', 'steady', { gpu: 'a', zone: 'x' }, 2)
+      await store.createDevice('t', 'moves', { gpu: 'a', zone: 'x' }, 1)
+      await store.addObservation('t', 'moves', { gpu: 'a', zone: 'y' }, 2)
+      await store.createDevice('t', 'once', { gpu: 'b' }, 1)
+      await store.createDevice('other', 'x', { gpu: 'q' }, 1)
+      await store.addObservation('other', 'x', { gpu: 'r' }, 2)
+      const byFeature = Object.fromEntries((await store.featureStability('t')).map((item) => [item.feature, item]))
+      assert.deepEqual(
+        byFeature.gpu,
+        { feature: 'gpu', devices: 2, changed: 0 },
+        'one visit is not enough, and another tenant does not count',
+      )
+      assert.deepEqual(byFeature.zone, { feature: 'zone', devices: 2, changed: 1 })
+      assert.deepEqual(await store.featureStability('nobody'), [])
+    })
+  })
+}
+
 describe('GET /v1/anonymity', () => {
   it('shows, by feature, the share of devices that are easy to single out', async () => {
     const server = await startServer(config(), { port: 0 })

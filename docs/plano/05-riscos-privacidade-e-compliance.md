@@ -61,9 +61,10 @@ Gravidade e probabilidade são julgamentos do autor. "Residual" considera os con
 | R12 | Falta de transparência com o visitante | Média | Média | Modelos de política e consentimento | Médio | O site precisa publicar e manter o texto |
 | R13 | Mudança de navegador degrada a identificação sem aviso | Média | Alta | Evidência explicada; limiar parametrizado | Médio | Monitor de deriva (I2) |
 | R14 | Licença: uso de JA4+ não livre | Média | Baixa | Só JA4 (BSD-3); regra 4 do `CLAUDE.md` | Baixo | Conferir o repositório da FoxIO antes de qualquer mudança |
-| R15 | Grafo compartilhado ligado sem parecer | **Muito alta** | Baixa | Não existe no código; trava no `CLAUDE.md` | Baixo | Manter assim até o parecer |
+| R15 | Grafo compartilhado ligado sem parecer | **Muito alta** | Baixa | Existe o mecanismo (D74), **desligado e travado** pela configuração (parecer e segredo obrigatórios); trava no `CLAUDE.md` | Baixo | Manter assim até o parecer |
 | R16 | Transferência internacional (servidor ou cópia fora do Brasil) | Média | Média | Nenhum | **Aberto** | Definir onde o dado vive e a base legal |
-| R17 | Uso do sistema para perseguir uma pessoa | Média | Baixa | `linkedId` é código interno, e-mail é recusado; sem busca por pessoa | Baixo | Política de uso aceitável no contrato |
+| R17 | Uso do sistema para perseguir uma pessoa | Média | Baixa | `linkedId` é código interno, e-mail é recusado; a camada de pessoa (R18) responde "quem mais é esta pessoa" só dentro do tenant | Baixo | Política de uso aceitável no contrato |
+| R18 | Camada de pessoa (D104) liga aparelhos de pessoas e pode juntar quem não é a mesma (família no mesmo Wi-Fi, conta compartilhada, notebooks iguais) | Alta | Média | Rede e `possible_link` não agrupam; teto de aparelhos; IP lotado não liga; rejeição final; só no tenant; retenção igual à dos eventos; apagamento e merge levam as ligações; ligada por decisão do dono | Médio | **Atualizar a LIA e o RIPD** (`privacidade/`) antes de produção, incluir as ligações na exportação do titular e medir falsas ligações com dados reais |
 
 ## 6. Ética da coleta de dados reais (Fase 0)
 

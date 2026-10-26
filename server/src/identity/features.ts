@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 
 import type { SerializedSignal } from '../ingest/validate'
+import { browserOf } from '../net/browser'
+import { coreHeaderFp } from '../net/headers'
 
 /**
  * How often a feature of the same device changes between visits:
@@ -20,21 +22,36 @@ export interface FeatureInput {
     ja4?: string
     ja4r?: string
     headerFp?: string
+    /** The names of the headers in the order received (lower case, without proxy headers) */
+    headerNames?: readonly string[]
     http2Fp?: string
     viaProxy: boolean
+    /** The `user-agent` header, as the browser sent it */
+    userAgent?: string
   }
 }
 
 /** Present features only: a feature that could not be read is absent, and absence is never evidence */
 export type Features = Record<string, string>
 
+/**
+ * What a feature describes, which decides whether it can say two browsers are on the same machine:
+ * - machine: the same on one machine whatever the browser (screen, system time zone, local voices, graphics family)
+ * - browser: the engine, its version, its network stack or its storage; a different browser on the same machine differs
+ * - network: where the visit came from
+ */
+export type FeatureScope = 'machine' | 'browser' | 'network'
+
 interface FeatureSpec {
+  scope: FeatureScope
   volatility: Volatility
   /**
    * True for a value that is made up for one device and shared with no other, such as the random code that the page
    * stores in the browser. Agreeing on it is worth the most that a feature can be worth, whatever the population says.
    */
   identifier?: boolean
+  /** True for a feature that is no longer read (it never has a value) but whose name stays valid in saved settings */
+  retired?: boolean
   extract(input: FeatureInput): string | undefined
 }
 
@@ -82,9 +99,37 @@ export function ja4Normalized(ja4r: string | undefined): string | undefined {
   return digest([extensions, signatures ?? ''])
 }
 
+/** The kind of graphics card named by a renderer string. `software` is drawing without a card (SwiftShader). */
+export function gpuFamilyOf(renderer: string): string {
+  const text = renderer.toLowerCase()
+  if (/swiftshader|llvmpipe|software|basic render/.test(text)) {
+    return 'software'
+  }
+  if (/apple/.test(text)) {
+    return 'apple'
+  }
+  if (/nvidia|geforce|quadro/.test(text)) {
+    return 'nvidia'
+  }
+  if (/\bamd\b|radeon|\bati\b/.test(text)) {
+    return 'amd'
+  }
+  if (/intel/.test(text)) {
+    return 'intel'
+  }
+  if (/qualcomm|adreno/.test(text)) {
+    return 'qualcomm'
+  }
+  if (/\bmali\b|\barm\b/.test(text)) {
+    return 'arm'
+  }
+  return 'other'
+}
+
 export const featureSpecs: Record<string, FeatureSpec> = {
   // --- Rendering: hardware and drivers
   canvas: {
+    scope: 'browser',
     volatility: 'semi',
     extract: (input) => {
       const canvas = asObject(component(input, 'canvas'))
@@ -95,6 +140,7 @@ export const featureSpecs: Record<string, FeatureSpec> = {
     },
   },
   webglRenderer: {
+    scope: 'browser',
     volatility: 'stable',
     extract: (input) => {
       const basics = asObject(component(input, 'webGlBasics'))
@@ -103,6 +149,7 @@ export const featureSpecs: Record<string, FeatureSpec> = {
     },
   },
   webglVendor: {
+    scope: 'browser',
     volatility: 'stable',
     extract: (input) => {
       const basics = asObject(component(input, 'webGlBasics'))
@@ -111,6 +158,7 @@ export const featureSpecs: Record<string, FeatureSpec> = {
     },
   },
   webglParameters: {
+    scope: 'browser',
     volatility: 'semi',
     extract: (input) => {
       const webgl = asObject(component(input, 'webGlExtensions'))
@@ -118,35 +166,109 @@ export const featureSpecs: Record<string, FeatureSpec> = {
     },
   },
   webglExtensions: {
+    scope: 'browser',
     volatility: 'semi',
     extract: (input) => {
       const webgl = asObject(component(input, 'webGlExtensions'))
       return webgl ? digest([webgl.extensions, webgl.extensionParameters]) : undefined
     },
   },
-  audio: { volatility: 'semi', extract: simple('audio', (value) => typeof value === 'number' && value > 0) },
+  audio: {
+    scope: 'browser',
+    volatility: 'semi',
+    extract: simple('audio', (value) => typeof value === 'number' && value > 0),
+  },
   // --- Fonts and text
-  fonts: { volatility: 'stable', extract: simple('fonts', (value) => Array.isArray(value)) },
-  fontPreferences: { volatility: 'semi', extract: simple('fontPreferences') },
+  fonts: {
+    scope: 'browser',
+    volatility: 'stable',
+    extract: simple('fonts', (value) => Array.isArray(value)),
+  },
+  fontPreferences: {
+    scope: 'browser',
+    volatility: 'semi',
+    extract: simple('fontPreferences'),
+  },
   // --- Engine
-  math: { volatility: 'semi', extract: simple('math') },
+  math: {
+    scope: 'browser',
+    volatility: 'semi',
+    extract: simple('math'),
+  },
   // --- Screen and hardware
-  screenResolution: { volatility: 'stable', extract: simple('screenResolution') },
-  screenFrame: { volatility: 'volatile', extract: simple('screenFrame') },
-  colorDepth: { volatility: 'stable', extract: simple('colorDepth') },
-  colorGamut: { volatility: 'stable', extract: simple('colorGamut') },
-  hdr: { volatility: 'stable', extract: simple('hdr') },
-  touch: { volatility: 'stable', extract: simple('touchSupport') },
-  hardwareConcurrency: { volatility: 'stable', extract: simple('hardwareConcurrency') },
-  deviceMemory: { volatility: 'stable', extract: simple('deviceMemory') },
+  screenResolution: {
+    scope: 'machine',
+    volatility: 'stable',
+    extract: simple('screenResolution'),
+  },
+  screenFrame: {
+    scope: 'browser',
+    volatility: 'volatile',
+    extract: simple('screenFrame'),
+  },
+  colorDepth: {
+    scope: 'machine',
+    volatility: 'stable',
+    extract: simple('colorDepth'),
+  },
+  colorGamut: {
+    scope: 'machine',
+    volatility: 'stable',
+    extract: simple('colorGamut'),
+  },
+  hdr: {
+    scope: 'machine',
+    volatility: 'stable',
+    extract: simple('hdr'),
+  },
+  touch: {
+    scope: 'browser',
+    volatility: 'stable',
+    extract: simple('touchSupport'),
+  },
+  hardwareConcurrency: {
+    scope: 'browser',
+    volatility: 'stable',
+    extract: simple('hardwareConcurrency'),
+  },
+  deviceMemory: {
+    scope: 'browser',
+    volatility: 'stable',
+    extract: simple('deviceMemory'),
+  },
   // --- System and browser
-  platform: { volatility: 'stable', extract: simple('platform') },
-  timezone: { volatility: 'semi', extract: simple('timezone') },
-  languages: { volatility: 'semi', extract: simple('languages') },
-  vendor: { volatility: 'stable', extract: simple('vendor') },
-  plugins: { volatility: 'semi', extract: simple('plugins') },
-  architecture: { volatility: 'stable', extract: simple('architecture') },
+  platform: {
+    scope: 'machine',
+    volatility: 'stable',
+    extract: simple('platform'),
+  },
+  timezone: {
+    scope: 'machine',
+    volatility: 'semi',
+    extract: simple('timezone'),
+  },
+  languages: {
+    scope: 'browser',
+    volatility: 'semi',
+    extract: simple('languages'),
+  },
+  vendor: {
+    scope: 'browser',
+    volatility: 'stable',
+    extract: simple('vendor'),
+  },
+  plugins: {
+    scope: 'browser',
+    volatility: 'semi',
+    extract: simple('plugins'),
+  },
+  architecture: {
+    scope: 'browser',
+    volatility: 'stable',
+    extract: simple('architecture'),
+  },
   userAgentPlatform: {
+    scope: 'browser',
     volatility: 'stable',
     extract: (input) => {
       const data = asObject(component(input, 'userAgentData'))
@@ -154,6 +276,7 @@ export const featureSpecs: Record<string, FeatureSpec> = {
     },
   },
   userAgentVersion: {
+    scope: 'browser',
     volatility: 'semi',
     extract: (input) => {
       const data = asObject(component(input, 'userAgentData'))
@@ -161,6 +284,7 @@ export const featureSpecs: Record<string, FeatureSpec> = {
     },
   },
   preferences: {
+    scope: 'browser',
     volatility: 'semi',
     extract: (input) =>
       digest(
@@ -171,6 +295,7 @@ export const featureSpecs: Record<string, FeatureSpec> = {
   },
   // --- Extra signals of the collector
   speechVoices: {
+    scope: 'machine',
     volatility: 'semi',
     extract: (input) => {
       const voices = extended(input, 'speechVoices')
@@ -185,6 +310,7 @@ export const featureSpecs: Record<string, FeatureSpec> = {
     },
   },
   mediaSupport: {
+    scope: 'browser',
     volatility: 'semi',
     extract: (input) => {
       const media = extended(input, 'mediaSupport')
@@ -192,6 +318,7 @@ export const featureSpecs: Record<string, FeatureSpec> = {
     },
   },
   storageQuota: {
+    scope: 'browser',
     volatility: 'semi',
     extract: (input) => {
       const quota = extended(input, 'storageQuota')
@@ -201,14 +328,17 @@ export const featureSpecs: Record<string, FeatureSpec> = {
   },
   // --- What only the server sees
   tlsCiphers: {
+    scope: 'browser',
     volatility: 'stable',
     extract: (input) => input.network.ja4?.split('_')[1],
   },
   tlsExtensions: {
+    scope: 'browser',
     volatility: 'semi',
     extract: (input) => ja4Normalized(input.network.ja4r),
   },
   tlsVersionAlpn: {
+    scope: 'browser',
     volatility: 'semi',
     extract: (input) => {
       const a = input.network.ja4?.split('_')[0]
@@ -216,18 +346,47 @@ export const featureSpecs: Record<string, FeatureSpec> = {
       return a && a.length === 10 ? `${a.slice(1, 3)}${a.slice(8, 10)}` : undefined
     },
   },
-  // The order of the headers and the HTTP/2 data describe the proxy when there is one
+  // Retired: it hashed every header and its casing, so it changed inside one browser (cache headers, HTTP/1 vs 2).
+  // The name stays so that saved settings that mention it are still valid. `headerCore` replaces it.
   headerOrder: {
+    scope: 'browser',
     volatility: 'semi',
-    extract: (input) => (input.network.viaProxy ? undefined : input.network.headerFp),
+    retired: true,
+    extract: () => undefined,
+  },
+  // The order of the headers and the HTTP/2 data describe the proxy when there is one
+  headerCore: {
+    scope: 'browser',
+    volatility: 'semi',
+    extract: (input) =>
+      input.network.viaProxy || !input.network.headerNames ? undefined : coreHeaderFp(input.network.headerNames),
   },
   http2: {
+    scope: 'browser',
     volatility: 'semi',
     extract: (input) => (input.network.viaProxy ? undefined : input.network.http2Fp),
+  },
+  // The family of the browser (chrome, firefox...): the same machine in another browser is a different browser here
+  browserFamily: {
+    scope: 'browser',
+    volatility: 'stable',
+    extract: (input) => (input.network.userAgent ? browserOf(input.network.userAgent) : undefined),
+  },
+  // The kind of graphics card, from the strings that every browser gives in its own words ("ANGLE (Intel Inc., ...)",
+  // "Intel(R) HD Graphics 400, or similar", "Apple GPU"), so that it can be the same in two browsers of one machine
+  gpuFamily: {
+    scope: 'machine',
+    volatility: 'stable',
+    extract: (input) => {
+      const basics = asObject(component(input, 'webGlBasics'))
+      const renderer = basics?.rendererUnmasked || basics?.renderer
+      return typeof renderer === 'string' && renderer !== '' ? gpuFamilyOf(renderer) : undefined
+    },
   },
   // The random code the page keeps in the browser (cookie, local storage, IndexedDB). Clearing the site data loses it,
   // so a different or missing code is weak evidence, and the same code is the strongest there is.
   storedId: {
+    scope: 'browser',
     volatility: 'volatile',
     identifier: true,
     extract: (input) => {
@@ -235,8 +394,16 @@ export const featureSpecs: Record<string, FeatureSpec> = {
       return typeof token === 'string' && /^[A-Za-z0-9_-]{22,64}$/.test(token) ? digest(token) : undefined
     },
   },
-  ipPrefix: { volatility: 'volatile', extract: (input) => input.network.ipPrefix },
-  ip: { volatility: 'volatile', extract: (input) => input.network.ip },
+  ipPrefix: {
+    scope: 'network',
+    volatility: 'volatile',
+    extract: (input) => input.network.ipPrefix,
+  },
+  ip: {
+    scope: 'network',
+    volatility: 'volatile',
+    extract: (input) => input.network.ip,
+  },
 }
 
 export const featureNames = Object.keys(featureSpecs)
@@ -244,6 +411,10 @@ export const featureNames = Object.keys(featureSpecs)
 /** Whether the feature is a code made up for one device (see `FeatureSpec.identifier`) */
 export function isIdentifier(feature: string): boolean {
   return featureSpecs[feature]?.identifier === true
+}
+
+export function scopeOf(feature: string): FeatureScope {
+  return featureSpecs[feature]?.scope ?? 'browser'
 }
 
 export function volatilityOf(feature: string): Volatility {
@@ -269,12 +440,15 @@ export function extractFeatures(input: FeatureInput): Features {
 
 /** The input of the matcher for an event that was stored by the server */
 export function featureInputOf(event: {
-  payload: { components: FeatureInput['components']; extended: FeatureInput['extended'] }
+  payload: {
+    components: FeatureInput['components']
+    extended: FeatureInput['extended']
+  }
   network: {
     ip: string
     ipPrefix: string
     viaProxy: boolean
-    headers: { fp: string }
+    headers: { fp: string; order?: string[]; values?: Record<string, string> }
     tls?: { ja4: string; ja4_r?: string }
     http2?: { fp: string }
   }
@@ -289,6 +463,8 @@ export function featureInputOf(event: {
       ja4: network.tls?.ja4,
       ja4r: network.tls?.ja4_r,
       headerFp: network.headers.fp,
+      headerNames: network.headers.order,
+      userAgent: network.headers.values?.['user-agent'],
       http2Fp: network.http2?.fp,
       viaProxy: network.viaProxy,
     },

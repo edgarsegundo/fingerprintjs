@@ -10,6 +10,8 @@ export type AuditAction =
   | 'visitor.delete'
   | 'visitor.merge'
   | 'visitor.split'
+  | 'visitor.person'
+  | 'visitor.link'
   | 'subject.export'
   | 'subject.delete'
   | 'deliveries.list'

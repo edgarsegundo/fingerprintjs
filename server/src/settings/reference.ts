@@ -122,6 +122,15 @@ const factDescriptions = {
   'identity.new': 'O aparelho é novo (o oposto de `identity.matched`).',
   'identity.ambiguous': 'Outro aparelho conhecido era quase tão provável quanto o escolhido.',
   'identity.possibleLink': 'A visita lembra um aparelho conhecido sem ter chegado ao limiar de ligação.',
+  'person.devices':
+    'Quantos aparelhos estão ligados a este (a pessoa), contando o próprio. Só existe com a camada de pessoa ligada.',
+  'person.linkedIds':
+    'Quantas contas distintas (`linkedId`) os aparelhos da pessoa já usaram. É o sinal de várias contas da mesma pessoa.',
+  'person.evidenceDevices':
+    'Quantos outros aparelhos estão ligados só por evidência (mesmo IP em horários próximos), sem fazer parte da pessoa.',
+  'person.truncated': 'A pessoa passou do máximo de aparelhos e foi cortada: não use `person.*` para decidir nada.',
+  'identity.sameMachineCount':
+    'Quantos aparelhos conhecidos parecem ser a mesma máquina desta visita em outro navegador (0 se nenhum).',
   'identity.learned': 'A visita pôde ensinar o motor (veja `identity.learnFromTampered`).',
   'identity.probability':
     'Probabilidade da ligação. **Só existe com modelo calibrado**; antes disso o campo está ausente, de propósito.',

@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { extractFeatures, FeatureInput, featureNames, isIdentifier, ja4Normalized, volatilityOf } from './features'
+import {
+  extractFeatures,
+  FeatureInput,
+  featureNames,
+  gpuFamilyOf,
+  isIdentifier,
+  ja4Normalized,
+  volatilityOf,
+} from './features'
 
 const sig = (value: unknown) => ({ value, duration: 1 })
 
@@ -47,6 +55,7 @@ function visit(overrides: Partial<FeatureInput> = {}): FeatureInput {
       ja4: 't13d1517h2_8daaf6152771_cb7bf5808d99',
       ja4r: 't13d1517h2_002f,0035_0005,000a,0015,0029,002b_0403,0804',
       headerFp: 'hfp',
+      headerNames: ['host', 'user-agent', 'accept', 'accept-language', 'sec-ch-ua', 'content-type', 'origin'],
       http2Fp: 'h2fp',
       viaProxy: false,
     },
@@ -94,7 +103,7 @@ describe('extractFeatures', () => {
       'userAgentPlatform',
       'tlsCiphers',
       'ip',
-      'headerOrder',
+      'headerCore',
       'storageQuota',
     ]) {
       assert.ok(name in features, name)
@@ -132,8 +141,50 @@ describe('extractFeatures', () => {
     const proxied = visit()
     proxied.network.viaProxy = true
     const features = extractFeatures(proxied)
-    assert.ok(!('headerOrder' in features) && !('http2' in features))
+    assert.ok(!('headerCore' in features) && !('http2' in features))
     assert.ok('tlsCiphers' in features, 'the other signals stay')
+  })
+
+  it('never reads the retired headerOrder, but keeps its name valid for saved settings', () => {
+    assert.ok(featureNames.includes('headerOrder'))
+    assert.ok(!('headerOrder' in extractFeatures(visit())))
+  })
+
+  it('keeps headerCore when the browser adds optional headers, and changes it when the core order changes', () => {
+    const base = extractFeatures(visit()).headerCore
+    assert.ok(base)
+    const withCache = visit()
+    withCache.network.headerNames = [
+      'host',
+      'cache-control',
+      'pragma',
+      'user-agent',
+      'if-none-match',
+      'accept',
+      'accept-language',
+      'sec-ch-ua',
+      'priority',
+      'content-type',
+      'origin',
+    ]
+    assert.equal(extractFeatures(withCache).headerCore, base)
+    const swapped = visit()
+    swapped.network.headerNames = [
+      'host',
+      'accept',
+      'user-agent',
+      'accept-language',
+      'sec-ch-ua',
+      'content-type',
+      'origin',
+    ]
+    assert.notEqual(extractFeatures(swapped).headerCore, base)
+  })
+
+  it('has no headerCore for an event whose header names were not kept', () => {
+    const old = visit()
+    delete old.network.headerNames
+    assert.ok(!('headerCore' in extractFeatures(old)))
   })
 
   it('uses only the local voices, since network voices come and go', () => {
@@ -186,5 +237,49 @@ describe('ja4Normalized', () => {
     assert.equal(ja4Normalized(undefined), undefined)
     assert.equal(ja4Normalized(''), undefined)
     assert.equal(ja4Normalized('only_two'), undefined)
+  })
+})
+
+describe('gpuFamilyOf', () => {
+  it('gives the same family for what each browser says about the same card', () => {
+    assert.equal(gpuFamilyOf('ANGLE (Intel Inc., Intel(R) Iris(TM) Plus Graphics 640, OpenGL 4.1)'), 'intel')
+    assert.equal(gpuFamilyOf('Intel(R) HD Graphics 400, or similar'), 'intel')
+    assert.equal(gpuFamilyOf('ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)'), 'apple')
+    assert.equal(gpuFamilyOf('Apple GPU'), 'apple')
+    assert.equal(gpuFamilyOf('ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)'), 'nvidia')
+    assert.equal(gpuFamilyOf('ANGLE (AMD, AMD Radeon Pro 560X OpenGL Engine, OpenGL 4.1)'), 'amd')
+    assert.equal(gpuFamilyOf('Adreno (TM) 640'), 'qualcomm')
+    assert.equal(gpuFamilyOf('Mali-G78'), 'arm')
+  })
+
+  it('keeps software drawing apart from a real card, and does not invent a family', () => {
+    assert.equal(
+      gpuFamilyOf('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)'),
+      'software',
+    )
+    assert.equal(gpuFamilyOf('Something Unknown'), 'other')
+  })
+})
+
+describe('browserFamily and gpuFamily as features', () => {
+  it('reads the browser family from the user agent header, and is absent without one', () => {
+    const firefox = visit()
+    firefox.network.userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0'
+    assert.equal(extractFeatures(firefox).browserFamily, 'firefox')
+    const none = visit()
+    delete none.network.userAgent
+    assert.ok(!('browserFamily' in extractFeatures(none)), 'no header is not the family "other"')
+  })
+
+  it('reads the family of the card from WebGL, in either browser wording', () => {
+    const masked = visit()
+    masked.components.webGlBasics = sig({ renderer: 'Intel(R) HD Graphics 400, or similar', rendererUnmasked: '' })
+    const unmasked = visit()
+    unmasked.components.webGlBasics = sig({
+      renderer: 'ANGLE (Intel Inc.)',
+      rendererUnmasked: 'ANGLE (Intel Inc., Intel(R) Iris(TM) Plus Graphics 640, OpenGL 4.1)',
+    })
+    assert.equal(extractFeatures(masked).gpuFamily, extractFeatures(unmasked).gpuFamily)
+    assert.notEqual(extractFeatures(masked).webglRenderer, extractFeatures(unmasked).webglRenderer)
   })
 })

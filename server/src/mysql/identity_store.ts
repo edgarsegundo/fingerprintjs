@@ -8,6 +8,9 @@ import {
   DeviceEdit,
   DeviceProfile,
   FeatureAnonymity,
+  FeatureStability,
+  SeenDevice,
+  DeviceAccount,
   IdentityStore,
   Resolution,
 } from '../identity/store'
@@ -477,6 +480,62 @@ export class MysqlIdentityStore implements IdentityStore {
       linkedIds: Number(row.linked_ids),
       ips: Number(row.ips),
     }
+  }
+
+  async devicesSeenFrom(
+    tenantId: string,
+    query: { ip: string; since: number; until: number; limit: number },
+  ): Promise<SeenDevice[]> {
+    const rows = await this.db.query<{ device_id: string; last_seen: number }>(
+      `SELECT r.device_id AS device_id, MAX(e.received_at) AS last_seen
+           FROM identity_resolutions r
+           JOIN events e ON e.tenant_id = r.tenant_id AND e.request_id = r.request_id
+          WHERE r.tenant_id = ? AND e.ip = ? AND e.received_at >= ? AND e.received_at <= ?
+          GROUP BY r.device_id
+          ORDER BY last_seen DESC, r.device_id
+          LIMIT ?`,
+      [tenantId, query.ip, query.since, query.until, query.limit],
+    )
+    return rows.map((row) => ({ deviceId: row.device_id, lastSeen: Number(row.last_seen) }))
+  }
+
+  async devicesWithLinkedId(tenantId: string, linkedId: string, limit: number): Promise<string[]> {
+    const rows = await this.db.query<{ device_id: string }>(
+      `SELECT DISTINCT r.device_id AS device_id
+         FROM identity_resolutions r
+         JOIN events e ON e.tenant_id = r.tenant_id AND e.request_id = r.request_id
+        WHERE r.tenant_id = ? AND e.linked_id = ?
+        ORDER BY r.device_id LIMIT ?`,
+      [tenantId, linkedId, limit],
+    )
+    return rows.map((row) => row.device_id)
+  }
+
+  async accountsOf(tenantId: string, deviceIds: readonly string[], limit: number): Promise<DeviceAccount[]> {
+    const found: DeviceAccount[] = []
+    for (let i = 0; i < deviceIds.length && found.length < limit; i += 100) {
+      const rows = await this.db.query<{ device_id: string; linked_id: string }>(
+        `SELECT DISTINCT r.device_id AS device_id, e.linked_id AS linked_id
+           FROM identity_resolutions r
+           JOIN events e ON e.tenant_id = r.tenant_id AND e.request_id = r.request_id
+          WHERE r.tenant_id = ? AND e.linked_id IS NOT NULL AND r.device_id IN (?)
+          ORDER BY r.device_id, e.linked_id LIMIT ?`,
+        [tenantId, deviceIds.slice(i, i + 100), limit - found.length],
+      )
+      found.push(...rows.map((row) => ({ deviceId: row.device_id, linkedId: row.linked_id })))
+    }
+    return found
+  }
+
+  async featureStability(tenantId: string): Promise<FeatureStability[]> {
+    const rows = await this.db.query<{ feature: string; devices: number; changed: number }>(
+      `SELECT feature, COUNT(*) AS devices, COALESCE(SUM(CASE WHEN values_seen > 1 THEN 1 ELSE 0 END), 0) AS changed
+         FROM (SELECT device_id, feature, COUNT(*) AS values_seen, SUM(count) AS read_total
+                 FROM identity_features WHERE tenant_id = ? GROUP BY device_id, feature) AS per_device
+        WHERE read_total >= 2 GROUP BY feature ORDER BY feature`,
+      [tenantId],
+    )
+    return rows.map((row) => ({ feature: row.feature, devices: Number(row.devices), changed: Number(row.changed) }))
   }
 
   async recentRequests(tenantId: string, deviceId: string, limit: number): Promise<string[]> {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { headerSignals } from './headers'
+import { coreHeaderFp, headerSignals } from './headers'
 
 const chromeLike = [
   'Host',
@@ -79,5 +79,43 @@ describe('headerSignals', () => {
   it('copes with an empty list and an odd trailing element', () => {
     assert.deepEqual(headerSignals([]).order, [])
     assert.deepEqual(headerSignals(['host']).order, [])
+  })
+})
+
+describe('coreHeaderFp', () => {
+  const core = ['user-agent', 'accept', 'accept-language', 'sec-ch-ua', 'content-type', 'origin']
+
+  it('ignores optional headers and where they appear', () => {
+    const noisy = [
+      'host',
+      'cache-control',
+      'user-agent',
+      'pragma',
+      'accept',
+      'if-none-match',
+      'accept-language',
+      'priority',
+      'sec-ch-ua',
+      'content-type',
+      'origin',
+    ]
+    assert.equal(coreHeaderFp(noisy), coreHeaderFp(core))
+  })
+
+  it('is the same for HTTP/1.1 (Title-Case) and HTTP/2 (lower case) of the same browser', () => {
+    const h1 = headerSignals(['Host', 'a', 'User-Agent', 'b', 'Accept', 'c', 'Content-Type', 'd', 'Origin', 'e'])
+    const h2 = headerSignals(['user-agent', 'b', 'accept', 'c', 'content-type', 'd', 'origin', 'e'])
+    assert.notEqual(h1.fp, h2.fp, 'the old fingerprint was not stable here')
+    assert.equal(coreHeaderFp(h1.order), coreHeaderFp(h2.order))
+  })
+
+  it('changes when the order of the core headers changes, and tells two engines apart', () => {
+    assert.notEqual(coreHeaderFp(core), coreHeaderFp(['accept', 'user-agent', ...core.slice(2)]))
+    assert.notEqual(coreHeaderFp(core), coreHeaderFp(core.filter((name) => name !== 'sec-ch-ua')))
+  })
+
+  it('has no value when no core header is present', () => {
+    assert.equal(coreHeaderFp(['host', 'cookie']), undefined)
+    assert.equal(coreHeaderFp([]), undefined)
   })
 })

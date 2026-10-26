@@ -41,6 +41,26 @@ const storedValueHeaders = new Set([
   'priority',
 ])
 
+/**
+ * The headers that a browser sends on every request of the collector, whatever the state of its cache, the protocol
+ * (HTTP/1.1 or HTTP/2) or the DevTools. The list is part of the definition of the `headerCore` feature, so it is
+ * never a setting: changing it changes every value and breaks the history.
+ */
+const coreHeaderNames = new Set([
+  'user-agent',
+  'accept',
+  'accept-language',
+  'accept-encoding',
+  'content-type',
+  'origin',
+  'sec-fetch-site',
+  'sec-fetch-mode',
+  'sec-fetch-dest',
+  'sec-ch-ua',
+  'sec-ch-ua-mobile',
+  'sec-ch-ua-platform',
+])
+
 const maxValueLength = 512
 
 export interface HeaderSignals {
@@ -54,6 +74,19 @@ export interface HeaderSignals {
   /** Short hash of `order` and `casing`. Browsers and HTTP libraries differ here, and so do their versions. */
   fp: string
   values: Record<string, string>
+}
+
+/**
+ * Short hash of the relative order of the core headers that are present, without the casing. Unlike `fp`, it does not
+ * change when the browser adds an optional header (`cache-control`, `pragma`, `if-*`, `priority`) or switches between
+ * HTTP/1.1 and HTTP/2. It still tells browser engines apart, because they order and send these headers differently.
+ */
+export function coreHeaderFp(order: readonly string[]): string | undefined {
+  const core = order.filter((name) => coreHeaderNames.has(name))
+  if (core.length === 0) {
+    return undefined
+  }
+  return createHash('sha256').update(core.join(',')).digest('hex').slice(0, 16)
 }
 
 function casingOf(name: string): 'l' | 'T' | 'm' {

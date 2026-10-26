@@ -69,6 +69,41 @@ export interface Resolution {
     probability: number | null
     provisionalProbability: number
   }
+  /**
+   * Present when this visit came from the same address as other devices a short while ago and looks like the same
+   * machine as some of them in another browser. The identifiers stay separate: this is evidence for a person or a rule.
+   */
+  sameMachine?: SameMachine
+}
+
+/** A known device that is probably the same machine as the visit, seen in another browser. Evidence, never a merge. */
+export interface SameMachineLink {
+  visitorId: string
+  /** Evidence from the features of the machine alone, including the prior. Provisional: not calibrated. */
+  logOdds: number
+  /** The browser families that the device has been seen in */
+  browsers: string[]
+  /** The machine features that agreed and the ones that disagreed, strongest first */
+  agree: string[]
+  disagree: string[]
+}
+
+export interface SameMachine {
+  links: SameMachineLink[]
+  /** Set instead of links when too many devices shared the address for it to mean anything */
+  skipped?: 'shared_ip'
+}
+
+/** A device and an account id (`linkedId`) that went with one of its visits */
+export interface DeviceAccount {
+  deviceId: string
+  linkedId: string
+}
+
+/** A device that had a visit from an address, and when its latest one was */
+export interface SeenDevice {
+  deviceId: string
+  lastSeen: number
 }
 
 /** What is asked about recent visits: those of one device, or those from one address. Times are in ms and inclusive. */
@@ -95,6 +130,15 @@ export interface EventRef {
   ip: string
   linkedId?: string
   receivedAt: number
+}
+
+/** How stable a feature is, among the devices seen at least twice with it. Counts of devices, never visits. */
+export interface FeatureStability {
+  feature: string
+  /** Devices that read the feature in at least two visits */
+  devices: number
+  /** Of those, how many had more than one value */
+  changed: number
 }
 
 export interface FeatureAnonymity {
@@ -165,6 +209,20 @@ export interface IdentityStore {
    * easy to single out by that feature alone, so a high share means the feature identifies more than it hides.
    */
   anonymity(tenantId: string, k: number): MaybePromise<FeatureAnonymity[]>
+  /**
+   * The devices that had a visit from the address in the window, the latest first, at most `limit`. Only visits that
+   * were resolved. Used to find the other devices of the same address, so it must not read more than it is asked.
+   */
+  devicesSeenFrom(
+    tenantId: string,
+    query: { ip: string; since: number; until: number; limit: number },
+  ): MaybePromise<SeenDevice[]>
+  /** The devices that had a visit with this `linkedId`, at most `limit`. Only visits that were resolved. */
+  devicesWithLinkedId(tenantId: string, linkedId: string, limit: number): MaybePromise<string[]>
+  /** The account ids that went with the visits of these devices, one row per pair (at most `limit` rows) */
+  accountsOf(tenantId: string, deviceIds: readonly string[], limit: number): MaybePromise<DeviceAccount[]>
+  /** For each feature, how many devices (seen at least twice with it) changed its value. See `FeatureStability`. */
+  featureStability(tenantId: string): MaybePromise<FeatureStability[]>
   /** Counts the visits of a device, or from an address, in a window of time. One of the two must be given. */
   activity(tenantId: string, query: ActivityQuery): MaybePromise<Activity>
 }

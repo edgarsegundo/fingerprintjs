@@ -21,6 +21,9 @@ import { Cidr, normalizeIp, parseCidr } from './net/cidr'
 import { IpIntelProvider } from './net/ip_intel'
 import { extractNetworkSignals, NetworkSignals, Req, SignalContext } from './net/signals'
 import type { TimezoneCountries } from './net/timezones'
+import { linkVisit } from './person/linker'
+import type { PersonStore } from './person/store'
+import { personView } from './person/view'
 import { ipHashKey, protectIp, protectNetwork } from './privacy/ip_policy'
 import { assess, AssessDeps, graphKeyFor, summarizeVisit, tamperFor, VisitSummary } from './risk/assess'
 import { Settings, SettingsRegistry } from './settings/settings'
@@ -60,6 +63,8 @@ export interface AppDeps {
   usage?: UsageMeter
   /** The shared graph between tenants. Used only if the configuration turns it on, and only by tenants who join. */
   graph?: GraphStore
+  /** The ties between devices, from which a person is worked out. Without it there is no person layer. */
+  person?: PersonStore
   /** Where the record of accesses goes. Without it, nothing is recorded. */
   audit?: AuditLog
   /** Where the deliveries of webhooks wait to be sent. Without it, no webhook is sent. */
@@ -146,6 +151,7 @@ export function createApp(deps: AppDeps): (req: Req, res: Res) => void {
     const graph = settings.config.sharedGraph
     return {
       identity: deps.identity,
+      person: deps.person,
       timezones: deps.timezones,
       graph:
         graph.enabled && deps.graph
@@ -168,6 +174,7 @@ export function createApp(deps: AppDeps): (req: Req, res: Res) => void {
         usage: deps.usage,
         audit: deps.audit,
         graph: deps.graph,
+        person: deps.person,
         now,
         log: deps.log ?? (() => undefined),
         failedAttempt: (address) =>
@@ -438,6 +445,17 @@ export function createApp(deps: AppDeps): (req: Req, res: Res) => void {
       return deleteSubject(req, res, url, key, context)
     }
 
+    const personMatch = /^\/v1\/visitors\/([A-Za-z0-9_-]{1,64})\/(person|links)$/.exec(url.pathname)
+    if (personMatch) {
+      const reading = personMatch[2] === 'person'
+      if (method !== (reading ? 'GET' : 'POST')) {
+        throw new HttpError(405, { error: 'method_not_allowed' }, { Allow: reading ? 'GET' : 'POST' })
+      }
+      return reading
+        ? readPerson(req, res, personMatch[1], key, context)
+        : decideLink(req, res, personMatch[1], key, context)
+    }
+
     const editMatch = /^\/v1\/visitors\/([A-Za-z0-9_-]{1,64})\/(merge|split)$/.exec(url.pathname)
     if (editMatch) {
       if (method !== 'POST') {
@@ -575,10 +593,12 @@ export function createApp(deps: AppDeps): (req: Req, res: Res) => void {
           explanationSize: s.identity.explanationSize,
           possibleLinkProbability: s.identity.possibleLinkProbability,
           learn: mayLearn(event, s),
+          sameMachine: s.identity.sameMachine,
         })
         deps.metrics?.inc('fp_identity_resolutions_total', {
           result: !resolution.matched ? 'new' : resolution.ambiguous ? 'ambiguous' : 'matched',
         })
+        await linkDevices(event, resolution, s)
         await contributeToGraph(event, resolution, s)
         await enqueueWebhooks(event, resolution, s)
       } catch (error) {
@@ -810,6 +830,85 @@ export function createApp(deps: AppDeps): (req: Req, res: Res) => void {
     return { route: 'visitor', tenantId: tenant.id, status: 200 }
   }
 
+  async function readPerson(req: Req, res: Res, asked: string, key: string, context: RequestContext) {
+    const tenant = await authenticate(req, key, context, 'visitor.person', asked)
+    const s = settings.for(tenant.id)
+    await limit(limiterFor(`api|${tenant.id}`, s.limits.apiPerMinutePerTenant), tenant.id)
+    if (!deps.person || !deps.identity || !s.identity.person.enabled) {
+      throw new HttpError(404, { error: 'not_found' })
+    }
+    const visitorId = await deps.identity.resolveAlias(tenant.id, asked)
+    if (!(await deps.identity.getProfile(tenant.id, visitorId))) {
+      throw new HttpError(404, { error: 'not_found' })
+    }
+    reply(res, 200, {
+      visitorId,
+      ...(await personView({ person: deps.person, identity: deps.identity }, tenant.id, visitorId, s.identity.person)),
+    })
+    return { route: 'visitor_person', tenantId: tenant.id, status: 200 }
+  }
+
+  /** A person's decision about two devices: same person (confirm), not (reject), or take the decision back (clear) */
+  async function decideLink(req: Req, res: Res, asked: string, key: string, context: RequestContext) {
+    const tenant = await authenticate(req, key, context, 'visitor.link', asked)
+    const s = settings.for(tenant.id)
+    await limit(limiterFor(`api|${tenant.id}`, s.limits.apiPerMinutePerTenant), tenant.id)
+    if (!s.api.allowIdentityEdits) {
+      throw new HttpError(403, { error: 'identity_edits_disabled' })
+    }
+    if (!deps.person || !deps.identity || !s.identity.person.enabled) {
+      throw new HttpError(404, { error: 'not_found' })
+    }
+    const body = await readEditBody(req, s)
+    const other = body.with
+    const decision = body.decision
+    if (typeof other !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(other)) {
+      throw new HttpError(400, { error: 'invalid_parameter', parameter: 'with' })
+    }
+    const status = { confirm: 'confirmed', reject: 'rejected', clear: 'auto' }[String(decision)] as
+      | 'confirmed'
+      | 'rejected'
+      | 'auto'
+      | undefined
+    if (status === undefined) {
+      throw new HttpError(400, { error: 'invalid_parameter', parameter: 'decision' })
+    }
+    const a = await deps.identity.resolveAlias(tenant.id, asked)
+    const b = await deps.identity.resolveAlias(tenant.id, other)
+    if (a === b) {
+      throw new HttpError(409, { error: 'same_device' })
+    }
+    if (!(await deps.identity.getProfile(tenant.id, a)) || !(await deps.identity.getProfile(tenant.id, b))) {
+      throw new HttpError(404, { error: 'unknown_device' })
+    }
+    await deps.person.decide(tenant.id, a, b, status, now())
+    reply(res, 200, { visitorId: a, with: b, status })
+    return { route: 'visitor_link', tenantId: tenant.id, status: 200 }
+  }
+
+  /** Notes the ties that this visit shows between its device and others (the person layer). Failures are logged. */
+  async function linkDevices(event: StoredEvent, resolution: Resolution, s: Settings): Promise<void> {
+    if (!deps.person || !deps.identity || !s.identity.person.enabled) {
+      return
+    }
+    try {
+      await linkVisit(
+        { devices: deps.identity, person: deps.person },
+        event.tenantId,
+        { ip: event.network.ip, linkedId: event.payload.linkedId, receivedAt: event.receivedAt },
+        resolution,
+        s.identity.person,
+      )
+    } catch (error) {
+      deps.metrics?.inc('fp_identity_failures_total')
+      log({
+        route: 'person_failed',
+        tenantId: event.tenantId,
+        error: error instanceof Error ? error.message : 'unknown',
+      })
+    }
+  }
+
   /**
    * Tells the shared graph that the tenant saw this device, and whether it flagged the visit. Only a tenant that joined
    * does it, only with a key made from enough features, and what is written is the key, the tenant and two times.
@@ -962,6 +1061,17 @@ export function createApp(deps: AppDeps): (req: Req, res: Res) => void {
       }
       await deps.graph.deleteKeys(tenantId, [...new Set(keys)])
     }
+    // The ties of the devices of these visits go too: some of them were made from the account id that is being erased
+    if (deps.person && deps.identity) {
+      const devices = new Set<string>()
+      for (const id of requestIds) {
+        const resolution = await deps.identity.getResolution(tenantId, id)
+        if (resolution) {
+          devices.add(resolution.visitorId)
+        }
+      }
+      await deps.person.deleteDevices(tenantId, [...devices])
+    }
     const deleted = await store.deleteEvents(tenantId, requestIds)
     const deliveries = (await deps.webhooks?.deleteForRequests(tenantId, requestIds)) ?? 0
     const devices = (await deps.identity?.removeOrphans()) ?? 0
@@ -1020,10 +1130,13 @@ export function createApp(deps: AppDeps): (req: Req, res: Res) => void {
     if (typeof into !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(into)) {
       throw new HttpError(400, { error: 'invalid_parameter', parameter: 'into' })
     }
+    const from = await identity.resolveAlias(tenant.id, fromId)
     const result = await identity.merge(tenant.id, fromId, into)
     if (!result.ok) {
       throw new HttpError(result.reason === 'same_device' ? 409 : 404, { error: result.reason })
     }
+    // The ties of the device that is gone follow it into the one that stays
+    await deps.person?.repoint(tenant.id, from, result.visitorId)
     reply(res, 200, { visitorId: result.visitorId, mergedFrom: fromId, visits: result.visits })
     return { route: 'visitor_merge', tenantId: tenant.id, status: 200 }
   }

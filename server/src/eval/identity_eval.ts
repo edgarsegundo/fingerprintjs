@@ -33,7 +33,11 @@ export function assignWithEngine(dataset: Dataset, model: Model = defaultModel()
   let counter = 0
   const engine = new SyncIdentityEngine(new MemoryIdentityStore(), model, { newId: () => `v${++counter}` })
   return [...dataset.events].sort(byTime).map((event) => {
-    const features = extractFeatures({ components: event.components, extended: event.extended, network: event.network })
+    const features = extractFeatures({
+      components: event.components,
+      extended: event.extended,
+      network: { ...event.network, userAgent: event.userAgent },
+    })
     const resolution = engine.resolve('eval', event.requestId, features, event.receivedAt)
     return { requestId: event.requestId, label: event.label, visitorId: resolution.visitorId }
   })

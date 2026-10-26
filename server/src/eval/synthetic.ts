@@ -125,6 +125,11 @@ export function generateSynthetic(options: SyntheticOptions): Dataset {
           ja4: `t13d15${extensions.length + 9}h2_${ciphers}_${extensionHash}`,
           ja4r: `t13d15${extensions.length + 9}h2_${ciphers}_${extensions.sort().join(',')}`,
           headerFp: `headers_${browser}`,
+          headerNames: [
+            ['user-agent', 'accept', 'sec-ch-ua', 'sec-ch-ua-mobile', 'sec-ch-ua-platform', 'content-type', 'origin'],
+            ['user-agent', 'accept', 'accept-language', 'accept-encoding', 'content-type', 'origin'],
+            ['accept', 'sec-fetch-site', 'sec-fetch-mode', 'user-agent', 'content-type', 'origin'],
+          ][browser],
           http2Fp: `h2_${browser}`,
           viaProxy: false,
           httpVersion: '2.0',

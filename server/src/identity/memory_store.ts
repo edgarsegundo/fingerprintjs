@@ -9,6 +9,9 @@ import {
   DeviceProfile,
   EventRef,
   FeatureAnonymity,
+  FeatureStability,
+  SeenDevice,
+  DeviceAccount,
   IdentityStore,
   Resolution,
 } from './store'
@@ -248,6 +251,65 @@ export class MemoryIdentityStore implements IdentityStore {
       result.push({ feature, devices, devicesBelowK: below })
     }
     return result.sort((a, b) => (a.feature < b.feature ? -1 : 1))
+  }
+
+  devicesSeenFrom(tenantId: string, query: { ip: string; since: number; until: number; limit: number }): SeenDevice[] {
+    const latest = new Map<string, number>()
+    for (const [requestId, { deviceId }] of this.tenant(tenantId).resolutions) {
+      const event = this.eventOf(tenantId, requestId)
+      if (!event || event.ip !== query.ip || event.receivedAt < query.since || event.receivedAt > query.until) {
+        continue
+      }
+      latest.set(deviceId, Math.max(latest.get(deviceId) ?? 0, event.receivedAt))
+    }
+    return [...latest]
+      .map(([deviceId, lastSeen]) => ({ deviceId, lastSeen }))
+      .sort((a, b) => b.lastSeen - a.lastSeen || (a.deviceId < b.deviceId ? -1 : 1))
+      .slice(0, query.limit)
+  }
+
+  devicesWithLinkedId(tenantId: string, linkedId: string, limit: number): string[] {
+    const found = new Set<string>()
+    for (const [requestId, { deviceId }] of this.tenant(tenantId).resolutions) {
+      if (this.eventOf(tenantId, requestId)?.linkedId === linkedId) {
+        found.add(deviceId)
+      }
+    }
+    return [...found].sort().slice(0, limit)
+  }
+
+  accountsOf(tenantId: string, deviceIds: readonly string[], limit: number): DeviceAccount[] {
+    const wanted = new Set(deviceIds)
+    const pairs = new Map<string, DeviceAccount>()
+    for (const [requestId, { deviceId }] of this.tenant(tenantId).resolutions) {
+      const linkedId = wanted.has(deviceId) ? this.eventOf(tenantId, requestId)?.linkedId : undefined
+      if (linkedId !== undefined) {
+        pairs.set(`${deviceId}\u0000${linkedId}`, { deviceId, linkedId })
+      }
+    }
+    return [...pairs.values()]
+      .sort((x, y) => (x.deviceId < y.deviceId ? -1 : x.deviceId > y.deviceId ? 1 : x.linkedId < y.linkedId ? -1 : 1))
+      .slice(0, limit)
+  }
+
+  featureStability(tenantId: string): FeatureStability[] {
+    const byFeature = new Map<string, FeatureStability>()
+    for (const profile of this.tenant(tenantId).devices.values()) {
+      for (const [feature, values] of profile.features) {
+        let reads = 0
+        for (const use of values.values()) {
+          reads += use.count
+        }
+        if (reads < 2) {
+          continue
+        }
+        const entry = byFeature.get(feature) ?? { feature, devices: 0, changed: 0 }
+        entry.devices++
+        entry.changed += values.size > 1 ? 1 : 0
+        byFeature.set(feature, entry)
+      }
+    }
+    return [...byFeature.values()].sort((a, b) => (a.feature < b.feature ? -1 : 1))
   }
 
   recentRequests(tenantId: string, deviceId: string, limit: number): string[] {

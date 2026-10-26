@@ -176,6 +176,23 @@ describe('computeRisk', () => {
     assert.deepEqual(computeRisk(inputs({ resolution: resolution({ matched: false }) }), settings()).factors, [])
   })
 
+  it('weighs the same machine seen in another browser only when the weight says so', () => {
+    const linked = resolution({
+      sameMachine: {
+        links: [{ visitorId: 'v_2', logOdds: 5, browsers: ['chrome'], agree: ['platform'], disagree: [] }],
+      },
+    })
+    assert.deepEqual(computeRisk(inputs({ resolution: linked }), settings()).factors, [], 'the default weight is 0')
+    const s = settings()
+    s.sameMachineWeight = 7
+    assert.deepEqual(
+      computeRisk(inputs({ resolution: linked }), s).factors.map((f) => [f.id, f.weight]),
+      [['same_machine_other_browser', 7]],
+    )
+    const crowded = resolution({ sameMachine: { links: [], skipped: 'shared_ip' } })
+    assert.deepEqual(computeRisk(inputs({ resolution: crowded }), s).factors, [], 'a skipped address links nothing')
+  })
+
   it('weighs a stored code that was copied to another machine, and says nothing otherwise', () => {
     const copied = resolution({ storedIdConflict: true })
     const report = computeRisk(inputs({ resolution: copied }), settings())
@@ -373,6 +390,7 @@ describe('buildFacts', () => {
       'identity.new': false,
       'identity.ambiguous': false,
       'identity.possibleLink': false,
+      'identity.sameMachineCount': 0,
       'identity.storedIdConflict': false,
       'identity.learned': true,
       'velocity.linkedIdsPerDevice': 4,

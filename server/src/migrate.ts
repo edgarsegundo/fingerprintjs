@@ -14,6 +14,7 @@ export const copiedTables = [
   'identity_features',
   'identity_resolutions',
   'identity_aliases',
+  'identity_links',
   'webhook_deliveries',
   'audit_log',
   'usage_daily',

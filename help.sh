@@ -405,6 +405,19 @@ ORDER BY e.received_at DESC, j.outcome, ABS(j.weight) DESC;
 SQL
 }
 
+stats_stability() {
+  echo "Estabilidade das características: entre os aparelhos com duas visitas ou mais que leram a característica,"
+  echo "quantos tiveram mais de um valor (mudou). Quanto menor a taxa, mais estável. Poucos aparelhos dão pouca certeza."
+  mysql_run <<SQL
+SELECT feature AS caracteristica, COUNT(*) AS aparelhos,
+       SUM(IF(valores > 1, 1, 0)) AS mudou,
+       CONCAT(ROUND(100 * SUM(IF(valores > 1, 1, 0)) / COUNT(*)), '%') AS taxa
+FROM (SELECT device_id, feature, COUNT(*) AS valores, SUM(count) AS leituras
+      FROM identity_features WHERE tenant_id = '$T' GROUP BY device_id, feature) por_aparelho
+WHERE leituras >= 2 GROUP BY feature ORDER BY SUM(IF(valores > 1, 1, 0)) / COUNT(*) DESC, feature;
+SQL
+}
+
 stats_menu() {
   T="${T:-pwa}"
   D="${D:-30}"
@@ -431,6 +444,7 @@ stats_menu() {
     echo "14) Histórico de um aparelho"
     echo "15) Histórico de uma conta"
     echo "16) Por que a visita virou aparelho novo? (o que divergiu)"
+    echo "17) Estabilidade das características (quais mudam no mesmo aparelho)"
     echo " t) Trocar tenant ou período"
     echo " v) Voltar"
     read -r -p "Escolha: " stat_opt
@@ -452,6 +466,7 @@ stats_menu() {
       14) stats_device_history ;;
       15) stats_account_history ;;
       16) stats_why_new ;;
+      17) stats_stability ;;
       t|T) ask_scope ;;
       v|V) return ;;
       *) echo "Opção inválida." ;;

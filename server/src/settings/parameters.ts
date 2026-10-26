@@ -468,6 +468,86 @@ export const parameters: Parameter[] = [
     description: 'Quantos sinais aparecem na explicação de cada decisão.',
   },
   {
+    path: 'identity.sameMachine.enabled',
+    kind: { type: 'boolean' },
+    default: true,
+    description:
+      'Procura, para cada visita, aparelhos conhecidos que parecem ser a MESMA MÁQUINA em outro navegador (mesmo endereço pouco antes, nunca visto neste navegador, mesma tela, fuso, família de placa de vídeo e vozes do sistema). Não junta nada: o `visitorId` continua sendo por navegador e a ligação aparece em `identity.sameMachine` da resposta.',
+  },
+  {
+    path: 'identity.sameMachine.windowMinutes',
+    kind: { type: 'integer', min: 1, max: 1440 },
+    default: 30,
+    description:
+      'Por quantos minutos o mesmo endereço (IP) conta como "ao mesmo tempo" para procurar a mesma máquina em outro navegador. Mais alto acha mais casos e aumenta a chance de pegar outra pessoa na mesma rede.',
+  },
+  {
+    path: 'identity.sameMachine.maxDevicesPerIp',
+    kind: { type: 'integer', min: 1, max: 100 },
+    default: 5,
+    description:
+      'Se mais aparelhos conhecidos que isto usaram o mesmo endereço na janela (escritório, escola, operadora de celular com IP compartilhado), nada é ligado: o endereço não diz nada. A resposta marca `skipped: shared_ip`.',
+  },
+  {
+    path: 'identity.sameMachine.minLogOdds',
+    kind: { type: 'number', min: 0, max: 50 },
+    default: 4,
+    description:
+      'Evidência mínima, em log-odds, vinda só das características da máquina, para ligar. Valor PROVISÓRIO: sem dados reais rotulados (Fase 0) não existe número de precisão. Mais alto liga menos e erra menos.',
+  },
+  {
+    path: 'identity.sameMachine.minFeatures',
+    kind: { type: 'integer', min: 1, max: 20 },
+    default: 3,
+    description:
+      'Quantas características de máquina precisam ter concordado (e estar presentes na visita) para ligar. Impede ligar por uma ou duas características que quase todo mundo tem.',
+  },
+  {
+    path: 'identity.sameMachine.maxLinks',
+    kind: { type: 'integer', min: 1, max: 20 },
+    default: 3,
+    description: 'O máximo de ligações de mesma máquina que uma visita recebe (as mais fortes primeiro).',
+  },
+  {
+    path: 'identity.person.enabled',
+    kind: { type: 'boolean' },
+    default: true,
+    description:
+      'Liga a camada de pessoa: liga os aparelhos de um mesmo tenant por conta (`linkedId`), mesma máquina em outro navegador, mesma rede em horários próximos e correção manual, e responde "quem mais é esta pessoa" em `person` da resposta. Não muda nenhum `visitorId`. É um tratamento de dados que liga aparelhos; veja a análise de privacidade antes de ligar para outros tenants.',
+  },
+  {
+    path: 'identity.person.groupingKinds',
+    kind: {
+      type: 'list',
+      item: { type: 'enum', values: ['linked_id', 'same_machine', 'network', 'possible_link', 'manual'] },
+      max: 5,
+    },
+    default: ['linked_id', 'same_machine', 'manual'],
+    description:
+      'Que tipos de ligação fazem dois aparelhos virarem a mesma pessoa. `linked_id`: mesma conta. `same_machine`: mesma máquina em outro navegador. `manual`: ligação feita por uma pessoa. `network` (mesmo IP em horários próximos) e `possible_link` ficam de fora de propósito: uma família na mesma rede tem o mesmo IP e são pessoas diferentes, então são só evidência.',
+  },
+  {
+    path: 'identity.person.maxDevices',
+    kind: { type: 'integer', min: 2, max: 500 },
+    default: 20,
+    description:
+      'O máximo de aparelhos de uma pessoa. Uma conta compartilhada por mais aparelhos que isto não liga ninguém, e uma pessoa que passa disso é cortada e marcada `truncated`, sem alimentar regras.',
+  },
+  {
+    path: 'identity.person.networkWindowMinutes',
+    kind: { type: 'integer', min: 0, max: 1440 },
+    default: 60,
+    description:
+      'Por quantos minutos o mesmo IP gera uma ligação de rede (só evidência, não agrupa sozinha). 0 desliga a ligação por rede.',
+  },
+  {
+    path: 'identity.person.networkMaxDevicesPerIp',
+    kind: { type: 'integer', min: 1, max: 100 },
+    default: 5,
+    description:
+      'Se mais aparelhos que isto usaram o mesmo IP na janela (escritório, escola, operadora de celular), nenhuma ligação de rede é gravada.',
+  },
+  {
     path: 'identity.learnFromTampered',
     kind: { type: 'enum', values: ['always', 'not_high', 'never_flagged'] },
     default: 'not_high',
@@ -627,6 +707,27 @@ export const parameters: Parameter[] = [
     default: 15,
     description:
       'Peso de a visita parecer outro aparelho já conhecido sem ter chegado ao limiar de ligação (`identity.possibleLinkProbability`). Pode indicar quem troca de identificador de propósito.',
+  },
+  {
+    path: 'risk.sameMachineWeight',
+    kind: { type: 'number', min: 0, max: 100 },
+    default: 0,
+    description:
+      'Peso de a visita parecer a mesma máquina de outro aparelho em outro navegador (`identity.sameMachine`). O padrão é 0: usar dois navegadores é normal e não indica fraude. Aumente só se o seu caso trata isso como suspeito.',
+  },
+  {
+    path: 'risk.multiAccountWeight',
+    kind: { type: 'number', min: 0, max: 100 },
+    default: 20,
+    description:
+      'Peso de a pessoa (os aparelhos ligados a este) ter usado `risk.multiAccountThreshold` contas ou mais. É o sinal de várias contas da mesma pessoa. É um palpite até haver casos rotulados.',
+  },
+  {
+    path: 'risk.multiAccountThreshold',
+    kind: { type: 'integer', min: 2, max: 100 },
+    default: 2,
+    description:
+      'Quantas contas distintas (`linkedId`) a pessoa precisa ter usado para somar `risk.multiAccountWeight`.',
   },
   {
     path: 'risk.fakeCrawlerWeight',

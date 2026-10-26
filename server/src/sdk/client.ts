@@ -69,6 +69,8 @@ export interface EventResult {
     provisionalProbability: number | null
     explanation: Explanation[]
     possibleLink?: { visitorId: string }
+    /** Devices that look like the same machine in another browser. Evidence only: the ids are not joined. */
+    sameMachine?: { links: Array<{ visitorId: string; logOdds: number; browsers: string[] }>; skipped?: 'shared_ip' }
   } | null
   tamper: { signals: Array<{ id: string; severity: string; detail: string }>; counts: Record<string, number> } | null
   risk: {

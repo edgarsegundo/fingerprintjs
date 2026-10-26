@@ -1,6 +1,7 @@
 import type { Features } from './features'
 import { isIdentifier } from './features'
 import { Contribution, Model, PopulationStats, probabilityOf, scoreCandidate, ValuesSeen, volatilityFor } from './model'
+import { defaultSameMachineParams, SameMachineParams } from './same_machine'
 import { CandidateRule, defaultCandidateRule, DeviceProfile, Explanation, Resolution } from './store'
 
 export interface EngineOptions {
@@ -46,6 +47,8 @@ export interface ResolveParams {
    * device nor teach the engine a new value. For visits that should not be trusted to teach.
    */
   learn?: boolean
+  /** The search for the same machine in another browser. Off unless `enabled` is `true`. See `findSameMachine`. */
+  sameMachine?: Partial<SameMachineParams>
 }
 
 function valuesSeen(profile: { features: Map<string, Map<string, unknown>> }): ValuesSeen {
@@ -82,6 +85,7 @@ export function settle(
     onAmbiguous: params.onAmbiguous ?? 'separate',
     storedIdConflictThreshold: params.storedIdConflictThreshold ?? 10,
     learn: params.learn ?? true,
+    sameMachine: { ...defaultSameMachineParams, ...params.sameMachine },
   }
 }
 

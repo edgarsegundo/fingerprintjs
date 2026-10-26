@@ -109,6 +109,12 @@ one or creates a new one. The browser never sees it; the backend of the customer
   which features count) with the settings in [docs/configuracao.md](../docs/configuracao.md).
 - **Possible link.** With `identity.possibleLinkProbability` set, a visit that was not attached but whose closest device
   is certain enough carries `possibleLink`. The identifiers stay separate: it is a lead, not a merge.
+- **Same machine, other browser.** The visitor id is per browser. With `identity.sameMachine.enabled` (on by default), a visit
+  that came from the same address as other devices a short while ago, and looks like the same machine as some of them
+  seen only in other browsers, carries `identity.sameMachine.links` (each with the `visitorId`, the browsers, the machine
+  features that agreed and the ones that differed). A crowded address gives `skipped: "shared_ip"` and no links. It is
+  evidence for a rule or a person, never a merge, and `logOdds` is provisional (not calibrated). The risk fact is
+  `identity.sameMachineCount`.
 - **Tampered visits.** `identity.learnFromTampered` decides whether a visit with evidence of tampering may teach the
   engine (`not_high` by default). The resolution says `learned: false` when it did not.
 - Limits: signals of the client cannot tell apart two physical devices that look identical; ids are not corrected afterwards
@@ -216,8 +222,10 @@ Templates for the legal texts are in [docs/plano/privacidade/](../docs/plano/pri
 | `DELETE /v1/visitors/:id` | The same for one visitor |
 | `POST /v1/visitors/:id/merge` `{ "into": "<visitor id>" }` | Joins two devices into one: the values and the visits of both, and the old id keeps working as a name for the new one. A person's decision, never the engine's. |
 | `POST /v1/visitors/:id/split` `{ "requestIds": ["..."] }` | Takes those visits off the device into a new one. Never all of its visits. What an older visit taught, whose event is gone, stays with the device. |
+| `GET /v1/visitors/:id/person` | The person this device belongs to (`identity.person.enabled`): `devices`, the account ids they used (`linkedIds`), the `edges` that group them (same account, same machine, a person's decision), the `evidence` that groups nothing (same address, a device that was not close enough to join), `evidenceDevices` and `truncated`. Worked out when read, per tenant. |
+| `POST /v1/visitors/:id/links` `{ "with": "<visitor id>", "decision": "confirm" \| "reject" \| "clear" }` | A person's decision about two devices. `confirm`: same person, whatever the ties say. `reject`: not the same person, final (nothing brings the tie back). `clear`: takes the decision back. Needs `api.allowIdentityEdits`; audited as `visitor.link`. |
 
-Merging and splitting go to the audit log (`visitor.merge`, `visitor.split`) and can be turned off with `api.allowIdentityEdits`. They are the way to fix a duplicate that `identity.onAmbiguous: separate` left on purpose, using the `possibleLink` mark as the lead.
+Merging and splitting go to the audit log (`visitor.merge`, `visitor.split`; reading a person is `visitor.person` and a decision about a tie is `visitor.link`) and can be turned off with `api.allowIdentityEdits`. They are the way to fix a duplicate that `identity.onAmbiguous: separate` left on purpose, using the `possibleLink` mark as the lead.
 
 A deletion does not reach backups. Every export and deletion is written to the audit log (action, target, key, caller, status; never the content).
 

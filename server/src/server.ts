@@ -168,6 +168,7 @@ export async function startServer(config: Config, options: StartOptions = {}): P
     webhooks: webhookQueue,
     audit: auditLog,
     graph,
+    person: storage.person,
     usage,
     metrics,
     ready: async () => {
@@ -250,6 +251,7 @@ export async function startServer(config: Config, options: StartOptions = {}): P
       let events = 0
       let deliveries = 0
       let audits = 0
+      let links = 0
       for (const tenant of settings.tenants.all()) {
         const s = settings.for(tenant.id)
         events += await store.purgeTenant(tenant.id, now, s.retention.eventsDays * day)
@@ -259,6 +261,8 @@ export async function startServer(config: Config, options: StartOptions = {}): P
           now - s.webhooks.keepFailedDays * day,
         )
         audits += await auditLog.purgeTenant(tenant.id, now - s.audit.retentionDays * day)
+        // The ties live as long as the events that they were made from
+        links += await storage.person.purgeTenant(tenant.id, now - s.retention.eventsDays * day)
       }
       // What was given to the shared graph is kept for less time than the events, whatever the tenant wishes
       const edges = await graph.purge(now - config.sharedGraph.retentionDays * day)
@@ -267,7 +271,7 @@ export async function startServer(config: Config, options: StartOptions = {}): P
       await storage.sharedLimits?.purge(now - 2 * 60 * 1000)
       // A device with no event left is forgotten too
       const devices = await identityStore.removeOrphans()
-      options.log?.({ route: 'purge', events, nonces, devices, deliveries, audits, edges })
+      options.log?.({ route: 'purge', events, nonces, devices, deliveries, audits, edges, links })
     })().finally(() => {
       purging = undefined
     })

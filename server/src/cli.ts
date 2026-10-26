@@ -33,6 +33,8 @@ const usage = `Usage:
       events that have a linkedId, as a dataset (addresses are hashed unless --keep-ip)
   node server/dist/cli.js last-events --tenant <id> [--config file] [--count n]
       the last visits, one line each, with the address the server saw (to check the setup)
+  node server/dist/cli.js feature-stability --tenant <id> [--config file]
+      per feature: how many devices (seen at least twice) changed its value. Shows which signals are unstable.
   node server/dist/cli.js fit-model <dataset> --out model.json [--seed n]
       learns the model parameters from a labelled dataset (needs hundreds of devices to be worth anything)
   node server/dist/cli.js eval-identity <dataset> [--model model.json] [--out report.md] [--seed n]
@@ -190,6 +192,31 @@ async function lastEvents(options: Record<string, string | true>): Promise<void>
     out(summarizeEvent(event, (await identity.getResolution(tenantId, event.requestId)) ?? undefined))
   }
   await storage.close()
+}
+
+async function featureStability(options: Record<string, string | true>): Promise<void> {
+  const tenantId = text(options.tenant) ?? fail('feature-stability needs --tenant <id>')
+  const configFile =
+    text(options.config) ?? process.env.FP_CONFIG ?? fail('feature-stability needs --config <file> or FP_CONFIG')
+  const storage = await openExisting(loadConfig(configFile))
+  const rows = await storage.identity.featureStability(tenantId)
+  await storage.close()
+  if (rows.length === 0) {
+    process.stderr.write('Nenhum aparelho com duas visitas ou mais ainda.\n')
+    return
+  }
+  out('Estabilidade das características, por aparelho com duas visitas ou mais que leram a característica.')
+  out('"Mudou" é o aparelho que teve mais de um valor. Quanto menor, mais estável. Poucos aparelhos dão pouca certeza.')
+  out('')
+  out(`${'característica'.padEnd(24)}${'aparelhos'.padStart(10)}${'mudou'.padStart(8)}${'taxa'.padStart(8)}`)
+  for (const row of [...rows].sort((a, b) => b.changed / b.devices - a.changed / a.devices)) {
+    const rate = `${((100 * row.changed) / row.devices).toFixed(0)}%`
+    out(
+      `${row.feature.padEnd(24)}${String(row.devices).padStart(10)}${String(row.changed).padStart(8)}${rate.padStart(
+        8,
+      )}`,
+    )
+  }
 }
 
 async function deleteLinked(options: Record<string, string | true>): Promise<void> {
@@ -472,6 +499,8 @@ if (command === 'new-tenant' && positional[1] && /^[A-Za-z0-9_-]{1,64}$/.test(po
   run(exportEvents(options))
 } else if (command === 'last-events') {
   run(lastEvents(options))
+} else if (command === 'feature-stability') {
+  run(featureStability(options))
 } else if (command === 'reachability-receiver') {
   run(reachabilityReceiver(options))
 } else if (command === 'reachability-summary') {

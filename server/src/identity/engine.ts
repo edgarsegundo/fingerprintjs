@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto'
 
-import { decide, EngineOptions, ResolveParams, settle } from './decision'
+import { decide, EngineOptions, ResolveParams, Settled, settle } from './decision'
 import { mergeProfiles, Observation, profileOf, withoutObservations } from './edit'
 import type { Features } from './features'
-import type { Model } from './model'
+import type { Model, PopulationStats } from './model'
+import { findSameMachine } from './same_machine'
 import type { Activity, ActivityQuery, FeatureAnonymity, IdentityStore, Resolution } from './store'
 
 export type { EngineOptions, ResolveParams } from './decision'
@@ -48,6 +49,19 @@ export class IdentityEngine {
 
   async deviceCount(tenantId: string): Promise<number> {
     return (await this.store.population(tenantId, {})).devices
+  }
+
+  /** The devices that had a visit from the address in the window. See `IdentityStore.devicesSeenFrom`. */
+  async devicesSeenFrom(tenantId: string, query: { ip: string; since: number; until: number; limit: number }) {
+    return this.store.devicesSeenFrom(tenantId, query)
+  }
+
+  async devicesWithLinkedId(tenantId: string, linkedId: string, limit: number): Promise<string[]> {
+    return this.store.devicesWithLinkedId(tenantId, linkedId, limit)
+  }
+
+  async accountsOf(tenantId: string, deviceIds: readonly string[], limit: number) {
+    return this.store.accountsOf(tenantId, deviceIds, limit)
   }
 
   async getProfile(tenantId: string, deviceId: string) {
@@ -170,6 +184,36 @@ export class IdentityEngine {
     }
   }
 
+  private async sameMachine(
+    tenantId: string,
+    features: Features,
+    visitorId: string,
+    at: number,
+    settings: Settled,
+    population: PopulationStats,
+  ) {
+    const params = settings.sameMachine
+    if (!params.enabled || !features.ip || !features.browserFamily) {
+      return undefined
+    }
+    const seen = await this.store.devicesSeenFrom(tenantId, {
+      ip: features.ip,
+      since: at - params.windowMinutes * 60_000,
+      until: at,
+      // One more than the limit shows that the address was crowded; one more for the device of this visit
+      limit: params.maxDevicesPerIp + 2,
+    })
+    const others = seen.filter((item) => item.deviceId !== visitorId)
+    const profiles =
+      others.length > params.maxDevicesPerIp
+        ? []
+        : await this.store.getProfiles(
+            tenantId,
+            others.map((item) => item.deviceId),
+          )
+    return findSameMachine({ features, visitorId, seen, profiles, population, model: settings.model, params })
+  }
+
   async resolve(
     tenantId: string,
     requestId: string,
@@ -192,6 +236,13 @@ export class IdentityEngine {
         newDeviceId: this.newId,
         resolvedAt: this.now(),
       })
+      // Scored before this visit is written, like the decision: the counts of the population must not include it.
+      // Only a visit that is trusted to teach the engine may link machines: a link feeds the person layer.
+      // It is extra evidence: if the store cannot answer, the visit still gets its identity, without the link
+      const sameMachine = settings.learn
+        ? await this.sameMachine(tenantId, features, visitorId, at, settings, population).catch(() => undefined)
+        : undefined
+      const answer = sameMachine ? { ...resolution, sameMachine } : resolution
       if (settings.learn) {
         if (matched) {
           await this.store.addObservation(tenantId, visitorId, features, at)
@@ -199,8 +250,8 @@ export class IdentityEngine {
           await this.store.createDevice(tenantId, visitorId, features, at)
         }
       }
-      await this.store.saveResolution(tenantId, requestId, visitorId, resolution)
-      return resolution
+      await this.store.saveResolution(tenantId, requestId, visitorId, answer)
+      return answer
     })
   }
 }

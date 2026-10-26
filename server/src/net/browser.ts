@@ -1,8 +1,9 @@
 export type BrowserFamily = 'chrome' | 'edge' | 'firefox' | 'safari' | 'other'
 
 /**
- * A rough guess of the browser from the user agent, only to split a report into groups. It is not used to identify
- * anyone, and a user agent can be faked, so it is not a security signal either.
+ * A rough guess of the browser family from the user agent. It splits reports into groups and feeds the `browserFamily`
+ * feature (evidence that two visits are NOT the same browser, and the condition for a same-machine link). A user agent
+ * can be faked, so it is never a security signal.
  */
 export function browserOf(userAgent: string | undefined): BrowserFamily {
   if (!userAgent) {

@@ -9,6 +9,7 @@ import type { SharedLimits } from './ingest/ratelimit'
 import { MysqlDatabase } from './mysql/database'
 import { MysqlEventStore } from './mysql/event_store'
 import { MysqlIdentityStore } from './mysql/identity_store'
+import { MysqlPersonStore } from './mysql/person_store'
 import { MysqlRateLimits } from './mysql/rate_limits'
 import { createSchema } from './mysql/schema'
 import {
@@ -18,6 +19,7 @@ import {
   MysqlUsageMeter,
   MysqlWebhookQueue,
 } from './mysql/small_stores'
+import { MemoryPersonStore, PersonStore, SqlitePersonStore } from './person/store'
 import { MemoryEventStore } from './store/memory'
 import { SqliteEventStore } from './store/sqlite'
 import type { EventStore } from './store/types'
@@ -35,6 +37,8 @@ export interface Storage {
   tenants: TenantStore
   usage: UsageMeter
   graph: GraphStore
+  /** The ties between devices, from which a person is worked out */
+  person: PersonStore
   /** Rate limits that several instances share. Only a store on the network has it. */
   sharedLimits?: SharedLimits
   /** The connection to MySQL, for the tools that work on the tables themselves (the migration). Only MySQL has it. */
@@ -62,6 +66,7 @@ function aroundMemoryEvents(events: EventStore): Storage {
     tenants: new MemoryTenantStore(),
     usage: new MemoryUsageMeter(),
     graph: new MemoryGraphStore(),
+    person: new MemoryPersonStore(),
     close: () => Promise.resolve(events.close()),
   }
 }
@@ -77,6 +82,7 @@ function aroundSqlite(events: SqliteEventStore): Storage {
     tenants: new SqliteTenantStore(db),
     usage: new SqliteUsageMeter(db),
     graph: new SqliteGraphStore(db),
+    person: new SqlitePersonStore(db),
     close: () => Promise.resolve(events.close()),
   }
 }
@@ -101,6 +107,7 @@ export async function mysqlStorage(database: MysqlDatabase): Promise<Storage> {
     tenants: new MysqlTenantStore(database),
     usage: new MysqlUsageMeter(database),
     graph: new MysqlGraphStore(database),
+    person: new MysqlPersonStore(database),
     sharedLimits: new MysqlRateLimits(database),
     mysql: database,
     close: () => database.close(),

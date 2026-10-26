@@ -8,6 +8,7 @@ import type { GraphStore } from './graph/store'
 import { bearerMatches, HttpError, readBody, reply, Res } from './http_util'
 import type { IdentityEngine } from './identity/engine'
 import type { Req } from './net/signals'
+import type { PersonStore } from './person/store'
 import { ipHashKey, protectIp } from './privacy/ip_policy'
 import { buildCatalog, helpCoverage } from './settings/catalog'
 import { readOnlyParameters } from './settings/help'
@@ -26,6 +27,7 @@ export interface AdminDeps {
   webhooks?: WebhookQueue
   usage?: UsageMeter
   graph?: GraphStore
+  person?: PersonStore
   audit?: AuditLog
   now: () => number
   log: (entry: Record<string, unknown>) => void
@@ -316,6 +318,7 @@ export function createAdminHandler(deps: AdminDeps) {
     const audit = (await deps.audit?.purgeTenant(id, Number.MAX_SAFE_INTEGER)) ?? 0
     const usage = (await deps.usage?.deleteTenant(id)) ?? 0
     await deps.graph?.deleteTenant(id)
+    await deps.person?.deleteTenant(id)
     await tenantStore.delete(current.id)
     await settings.reloadTenants()
     const devices = (await deps.identity?.removeOrphans()) ?? 0

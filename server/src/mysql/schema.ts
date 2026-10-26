@@ -138,6 +138,20 @@ const statements = [
      KEY graph_edges_tenant (tenant_id),
      KEY graph_edges_seen (last_seen)
    ) ${options}`,
+  `CREATE TABLE IF NOT EXISTS identity_links (
+     tenant_id VARCHAR(64) NOT NULL,
+     a VARCHAR(48) NOT NULL,
+     b VARCHAR(48) NOT NULL,
+     kind VARCHAR(16) NOT NULL,
+     strength DOUBLE NOT NULL,
+     first_seen BIGINT NOT NULL,
+     last_seen BIGINT NOT NULL,
+     days INT NOT NULL DEFAULT 1,
+     status VARCHAR(10) NOT NULL DEFAULT 'auto',
+     PRIMARY KEY (tenant_id, a, b, kind),
+     KEY identity_links_b (tenant_id, b),
+     KEY identity_links_seen (tenant_id, last_seen)
+   ) ${options}`,
 ]
 
 /**
