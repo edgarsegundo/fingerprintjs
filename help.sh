@@ -372,6 +372,26 @@ ORDER BY e.received_at DESC LIMIT 50;
 SQL
 }
 
+stats_why_new() {
+  echo "Para as últimas visitas: o que o motor comparou com o aparelho mais parecido. 'agree' = a característica bateu,"
+  echo "'disagree' = divergiu (as que divergem explicam por que virou aparelho novo). weight = quanto pesou."
+  mysql_run <<SQL
+SELECT $BRT AS quando,
+       r.device_id AS aparelho,
+       IF(JSON_UNQUOTE(JSON_EXTRACT(r.resolution_json, '\$.matched')) = 'true', 'conhecido', 'NOVO') AS situacao,
+       j.feature AS caracteristica,
+       j.outcome AS resultado,
+       ROUND(j.weight, 2) AS peso
+FROM (SELECT * FROM events WHERE tenant_id = '$T' ORDER BY received_at DESC LIMIT 6) e
+JOIN identity_resolutions r ON r.tenant_id = e.tenant_id AND r.request_id = e.request_id,
+JSON_TABLE(r.resolution_json, '\$.explanation[*]' COLUMNS (
+  feature VARCHAR(64) PATH '\$.feature',
+  outcome VARCHAR(16) PATH '\$.outcome',
+  weight DOUBLE PATH '\$.weight')) j
+ORDER BY e.received_at DESC, j.outcome, ABS(j.weight) DESC;
+SQL
+}
+
 stats_menu() {
   T="${T:-pwa}"
   D="${D:-30}"
@@ -397,6 +417,7 @@ stats_menu() {
     echo "13) Rede: JA4, HTTP, TLS, listas de IP e país"
     echo "14) Histórico de um aparelho"
     echo "15) Histórico de uma conta"
+    echo "16) Por que a visita virou aparelho novo? (o que divergiu)"
     echo " t) Trocar tenant ou período"
     echo " v) Voltar"
     read -r -p "Escolha: " stat_opt
@@ -417,6 +438,7 @@ stats_menu() {
       13) stats_network ;;
       14) stats_device_history ;;
       15) stats_account_history ;;
+      16) stats_why_new ;;
       t|T) ask_scope ;;
       v|V) return ;;
       *) echo "Opção inválida." ;;
