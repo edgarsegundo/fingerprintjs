@@ -30,6 +30,7 @@ dava para fazer sem dados reais ([relatório](docs/plano/fases/fase-10-sem-dados
 - **Faturamento, painel de cliente com login, DPA e SLA** do SaaS não existem.
 - **Escala:** o banco de produção é o MySQL (D79); medido só em notebook, cerca de 30 visitas por segundo (D82). Vários servidores sobre um MySQL funcionam e foram testados com dois (D89). A busca de candidatos foi medida até 1 milhão de aparelhos **inventados** (D90): só latência.
 - **Medir quem não alcança o servidor** (porta 8443 bloqueada, bloqueadores): carregador, receptor de avisos e resumo existem e foram testados (D96, D97); **Safari e uma rede que bloqueia a porta de verdade não foram verificados**. A mudança para a porta 443 está só documentada (D98) e o dono decidiu não arriscar o nginx compartilhado.
+- **Painel de configuração (D101), Fase 1 pronta:** formulário dos 111 parâmetros com helptip, tenants no banco, `migrate-tenants.sh`. **Faltam as Fases 2 a 5** (histórico e desfazer, editor de regras, pré-visualização do efeito, perfis e glossário) e a explicação longa de 82 dos 111 parâmetros (`help_pending.ts`). Veja `docs/plano/painel-de-configuracao-como-usar-documentar-parametros-e-migrar-tenants.md`.
 - **Pesquisa** (`docs/plano/01-pesquisa-e-fontes.md`) foi mais rasa que o pedido original: cerca de 30 buscas.
 
 Documentos do plano: `01-pesquisa-e-fontes`, `02-inventario-de-capacidades`, `03-ideias-inovadoras`,
@@ -98,6 +99,25 @@ docker build -f server/Dockerfile -t fingerprint-server .   # na raiz do reposit
 ```
 
 `--ignore-engines` só existe porque o Node local é 22.22.0 e uma dependência de desenvolvimento pede 22.22.1.
+
+## Scripts da VPS e migrações do banco
+
+Na raiz do repositório, para rodar **na VPS** (`~/Repos/fingerprintjs`; o proxy fica em `~/Repos/reverse-proxy-config`). Cada um pede
+confirmação antes de algo irreversível. Nenhum mexe em outro banco: o servidor conecta como o usuário `fp`, que só tem permissão em `fingerprint.*`.
+
+| Script | Para que serve |
+|---|---|
+| `rebuild.sh` | Atualização de rotina: `git pull`, imagem, `dist/`, carregador para os sites, valida o `config.json`, recria `fingerprint` (e `fp-report`) e confere que o container usa a imagem nova. |
+| `init-config.sh` | **Instalação nova**: segredos do servidor e a chave de operador (`adm_`). **Não gera tenants** e recusa sobrescrever um `config.json` que ainda os liste. |
+| `migrate-tenants.sh` | **Uma vez**: copia os tenants do `config.json` para o banco com as mesmas chaves (`import-tenants`), gera a chave de operador, tira `tenants` do arquivo, reinicia e reverte sozinho se o servidor não ficar saudável. |
+| `help.sh` | Menu: MySQL, estatísticas das visitas, quem não alcançou o servidor, saúde, logs, chaves dos painéis (lê `.env`). |
+
+**Como migrar coisas neste projeto (leia antes de mudar o banco):**
+
+- **Esquema do MySQL:** passo numerado em `server/src/mysql/schema.ts` (`schema_migrations`), rodado uma vez, sob trava. Nunca edite um passo que já saiu (D91).
+- **Tenants:** vivem na tabela `tenants` (banco `fingerprint`), desde o D101. Tenant de arquivo não é editável pela API (`managed_by_file`); `import-tenants` (via `migrate-tenants.sh`) copia sem trocar chave. Enquanto o tenant estiver no arquivo, o arquivo vence.
+- **Configuração de tenant:** pelo painel `/dashboard/config` ou `PATCH /admin/v1/tenants/:id` (substitui o objeto `settings` inteiro; `keepReadOnly` preserva `webhooks.endpoints`).
+- Depois de mudar o código do servidor: commit e push no Mac (do dono), `git pull && ./rebuild.sh` na VPS. Mudou o esquema ou a forma de guardar algo: escreva o script ou o passo de migração junto, e **ensaie com SQLite** antes (nunca contra o MySQL de produção).
 
 ## Regras que não se negocia
 
@@ -171,6 +191,11 @@ docker build -f server/Dockerfile -t fingerprint-server .   # na raiz do reposit
 - Antes de reiniciar um servidor de teste, mate pela porta (`kill $(lsof -tiTCP:PORTA -sTCP:LISTEN)`), senão sobra instância velha.
 - `chrome --dump-dom` só mostra o documento de topo, não iframes.
 - `.claude/` aparece como não rastreado; não é do projeto.
+- **Nunca rode um comando da CLI dentro do container só para "testar" que ele existe** (`docker exec fingerprint node dist/cli.js <cmd> --help`): o
+  container tem `FP_CONFIG` definido, então o comando **executa de verdade** (foi assim que o `import-tenants` rodou sem querer). Para saber se o
+  container tem um comando, procure o texto no código (`docker exec fingerprint grep -q <cmd> dist/cli.js`).
+- **`FP_TEST_MYSQL_URL` cria e apaga bancos** (`server/src/testing/mysql.ts`). Nunca aponte para o MySQL de produção nem use o `root` dele.
+- Em scripts com `set -o pipefail`, `cmd | grep -q` falha se `cmd` sai com erro, mesmo que o `grep` ache o texto. Capture a saída antes.
 - Docker Desktop só enxerga caminhos sob `/Users`: um volume em `/private/tmp/...` chega vazio ao contêiner. Use `server/data/`
   (ignorado pelo git) para testes e apague depois.
 - `node:sqlite` imprime `ExperimentalWarning` ao iniciar; é esperado.
