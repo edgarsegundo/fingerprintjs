@@ -47,6 +47,36 @@ docker run --rm -v "$FP_REPO":/w -w /w node:22 sh -c \
   "npx --yes yarn@1.22.22 install --frozen-lockfile --ignore-scripts --ignore-engines && npx --yes yarn@1.22.22 build"
 ls -l dist/fp.min.js dist/fp-loader.min.js
 
+# Folders that receive fp-loader.min.js. The loader must be served by each site itself (not by the fingerprint server),
+# so a blocked port 8443 cannot hide it. Each site needs two copies: the source public/ folder (survives the next
+# deploy, which runs rsync --delete on the served folder) and the served folder (live right now, no redeploy needed).
+LOADER_DESTINATIONS=(
+  # app.empregoaqui.com.br
+  "$HOME/Repos/emprego/pwa/public"
+  /var/www/app.empregoaqui.com.br
+  # empregoaqui.com.br
+  # "$HOME/Repos/fastvistos/public/emprego"
+  # /var/www/emprego
+  # contrataraqui.com.br
+  # "$HOME/Repos/fastvistos/public/contratar"
+  # /var/www/contratar
+  # fastvistos.com.br
+  # "$HOME/Repos/fastvistos/public/fastvistos"
+  # /var/www/fastvistos
+)
+
+step "Copiando o carregador (fp-loader.min.js) para os sites"
+for dest in "${LOADER_DESTINATIONS[@]}"; do
+  if [ ! -d "$dest" ]; then
+    echo "  $dest não existe, pulei" >&2
+  elif cmp -s dist/fp-loader.min.js "$dest/fp-loader.min.js" 2>/dev/null; then
+    echo "  $dest já está atualizado"
+  else
+    cp dist/fp-loader.min.js "$dest/fp-loader.min.js" 2>/dev/null || sudo cp dist/fp-loader.min.js "$dest/fp-loader.min.js"
+    echo "  copiado para $dest"
+  fi
+done
+
 CONFIG="$PROXY/fingerprint/config"
 if [ ! -f "$CONFIG/config.json" ]; then
   echo
