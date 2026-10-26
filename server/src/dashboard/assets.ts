@@ -289,6 +289,7 @@ export const dashboardScript = `'use strict';
         var who = el('p')
         who.appendChild(el('span', identity.visitorId, 'mono'))
         who.appendChild(el('span', identity.matched ? ' - known device' : ' - new device'))
+        if (identity.mergedExisting) { who.appendChild(el('span', ' - joined with ' + identity.mergedExisting.from + ' (same machine in another browser)')) }
         if (identity.mergedAcrossBrowsers) { who.appendChild(el('span', ' - took the id of the same machine in another browser')) }
         who.appendChild(el('span', identity.calibrated ? ' - probability ' + identity.probability : ' - not calibrated (provisional ' + identity.provisionalProbability + ')'))
         box.appendChild(who)

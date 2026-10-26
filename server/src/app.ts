@@ -598,6 +598,10 @@ export function createApp(deps: AppDeps): (req: Req, res: Res) => void {
         deps.metrics?.inc('fp_identity_resolutions_total', {
           result: !resolution.matched ? 'new' : resolution.ambiguous ? 'ambiguous' : 'matched',
         })
+        if (resolution.mergedExisting) {
+          // The device that is gone: its ties follow it into the one that stays
+          await deps.person?.repoint(tenant.id, resolution.mergedExisting.from, resolution.mergedExisting.into)
+        }
         await linkDevices(event, resolution, s)
         await contributeToGraph(event, resolution, s)
         await enqueueWebhooks(event, resolution, s)

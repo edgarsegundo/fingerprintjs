@@ -75,6 +75,8 @@ export interface EventResult {
     sameMachine?: { links: Array<{ visitorId: string; logOdds: number; browsers: string[] }>; skipped?: 'shared_ip' }
     /** True when the tenant turned on `identity.sameMachine.merge` and this visit took the id of the other browser */
     mergedAcrossBrowsers?: true
+    /** Set when `identity.sameMachine.mergeExisting` made two known devices one: `from` is now an alias of `into` */
+    mergedExisting?: { from: string; into: string }
   } | null
   tamper: { signals: Array<{ id: string; severity: string; detail: string }>; counts: Record<string, number> } | null
   risk: {

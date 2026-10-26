@@ -23,6 +23,12 @@ export interface SameMachineParams {
   merge: boolean
   /** The least evidence, in log-odds, to take the other device's id. Above `minLogOdds`. Provisional. */
   mergeMinLogOdds: number
+  /**
+   * Off by default. On, a visit that is attached to a known device and is very probably the same machine as ANOTHER
+   * known device (seen only in other browsers) joins the two devices into one, as a person would with "merge", with
+   * the bar `mergeMinLogOdds` and a clear winner. It rewrites what the older visits belong to: its own switch.
+   */
+  mergeExisting: boolean
 }
 
 export const defaultSameMachineParams: SameMachineParams = {
@@ -34,6 +40,7 @@ export const defaultSameMachineParams: SameMachineParams = {
   maxLinks: 3,
   merge: false,
   mergeMinLogOdds: 6,
+  mergeExisting: false,
 }
 
 const machineOnly = (features: Features): Features =>
@@ -64,6 +71,23 @@ const rank = (a: Contribution, b: Contribution) =>
  * @param seen the devices seen from the address in the window, with or without the visit's own device
  * @param profiles the profiles of those devices
  */
+/**
+ * The population without one device. A visit that was attached to a known device is that device: its values are the
+ * values of this machine, and counting them again as "other devices that have them" would make every value of the
+ * machine look common, and the same machine impossible to tell from the rest.
+ */
+export function withoutDevice(population: PopulationStats, own: DeviceProfile | undefined): PopulationStats {
+  if (!own) {
+    return population
+  }
+  return {
+    devices: Math.max(0, population.devices - 1),
+    devicesWithValue: (feature, value) =>
+      Math.max(0, population.devicesWithValue(feature, value) - (own.features.get(feature)?.has(value) ? 1 : 0)),
+    agreementProbability: (feature) => population.agreementProbability(feature),
+  }
+}
+
 export function findSameMachine(input: {
   features: Features
   visitorId: string
@@ -121,21 +145,44 @@ export function findSameMachine(input: {
   return links.length === 0 ? undefined : { links }
 }
 
-/**
- * The device whose visitor id the visit should take, when `merge` is on: the best same-machine link, if it reaches the
- * stronger bar and beats the second one by the ambiguity margin. `undefined` otherwise, and the visit keeps its own id.
- */
-export function mergeTarget(
-  sameMachine: SameMachine | undefined,
-  params: SameMachineParams,
-  ambiguityMargin: number,
-): string | undefined {
-  if (!params.merge || !sameMachine || sameMachine.links.length === 0) {
+/** The best same-machine link, if it reaches the stronger bar and beats the second one by the ambiguity margin */
+function strongestLink(sameMachine: SameMachine | undefined, params: SameMachineParams, ambiguityMargin: number) {
+  if (!sameMachine || sameMachine.links.length === 0) {
     return undefined
   }
   const [best, second] = sameMachine.links
   if (best.logOdds < params.mergeMinLogOdds) {
     return undefined
   }
-  return second !== undefined && best.logOdds - second.logOdds < ambiguityMargin ? undefined : best.visitorId
+  return second !== undefined && best.logOdds - second.logOdds < ambiguityMargin ? undefined : best
+}
+
+/**
+ * The device whose visitor id a NEW visit should take, when `merge` is on: the strongest link (see `strongestLink`).
+ * `undefined` otherwise, and the visit keeps its own id.
+ */
+export function mergeTarget(
+  sameMachine: SameMachine | undefined,
+  params: SameMachineParams,
+  ambiguityMargin: number,
+): string | undefined {
+  return params.merge ? strongestLink(sameMachine, params, ambiguityMargin)?.visitorId : undefined
+}
+
+/**
+ * The other known device that a visit attached to a known device should be joined with, when `mergeExisting` is on. The
+ * browsers of the two devices must not overlap: two devices that were both seen in the same browser family are two
+ * people's browsers, and a machine has one of each.
+ */
+export function mergeExistingTarget(
+  sameMachine: SameMachine | undefined,
+  params: SameMachineParams,
+  ambiguityMargin: number,
+  ownBrowsers: ReadonlySet<string>,
+): string | undefined {
+  if (!params.mergeExisting) {
+    return undefined
+  }
+  const link = strongestLink(sameMachine, params, ambiguityMargin)
+  return link && !link.browsers.some((browser) => ownBrowsers.has(browser)) ? link.visitorId : undefined
 }

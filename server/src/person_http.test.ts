@@ -323,4 +323,31 @@ describe('the person layer, through the server', () => {
       await on.close()
     }
   })
+
+  it('joins two devices that already exist, and their ties, when the tenant turned on mergeExisting', async () => {
+    const server = await startServer(
+      config({ identity: { sameMachine: { mergeExisting: true, mergeMinLogOdds: 4 } } }),
+      { port: 0 },
+    )
+    try {
+      const a = await eventOf(server, await visit(server, chrome('acct-A')))
+      const b = await eventOf(server, await visit(server, firefox('acct-A')))
+      assert.notEqual(b.identity.visitorId, a.identity.visitorId, 'a new device: the other switch is off')
+      const c = await eventOf(server, await visit(server, firefox('acct-A')))
+      assert.equal(c.identity.visitorId, a.identity.visitorId, 'the older device stays')
+      assert.deepEqual((c.identity as { mergedExisting?: unknown }).mergedExisting, {
+        from: b.identity.visitorId,
+        into: a.identity.visitorId,
+      })
+      const person = await personOf(server, a.identity.visitorId)
+      assert.deepEqual(person.devices, [a.identity.visitorId], 'one device, and no tie to itself')
+      assert.equal(
+        (await get(server, `/v1/visitors/${b.identity.visitorId}`)).status,
+        200,
+        'the old id is a name for it',
+      )
+    } finally {
+      await server.close()
+    }
+  })
 })

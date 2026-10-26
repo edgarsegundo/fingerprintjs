@@ -80,6 +80,11 @@ export interface Resolution {
    * is true. A person can undo it by splitting the visit off (`POST /v1/visitors/:id/split`).
    */
   mergedAcrossBrowsers?: true
+  /**
+   * Present when the tenant turned on `identity.sameMachine.mergeExisting` and this visit made two known devices one:
+   * `from` is gone (an alias for `into` now) and `visitorId` is `into`, the older of the two.
+   */
+  mergedExisting?: { from: string; into: string }
 }
 
 /** A known device that is probably the same machine as the visit, seen in another browser. Evidence, never a merge. */

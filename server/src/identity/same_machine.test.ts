@@ -12,8 +12,10 @@ import { defaultModel } from './model'
 import {
   defaultSameMachineParams as defaultParams0,
   findSameMachine,
+  mergeExistingTarget,
   mergeTarget,
   SameMachineParams,
+  withoutDevice,
 } from './same_machine'
 import type { DeviceProfile } from './store'
 
@@ -344,6 +346,83 @@ for (const [name, create] of implementations) {
       })
     })
 
+    describe('joining two devices that already exist, when the tenant asked for it', () => {
+      const join = { mergeExisting: true, mergeMinLogOdds: 4 }
+      const setupLowBar = async () => {
+        const storage = await create()
+        let n = 0
+        // A lower bar than the default, so that a repeat visit is attached with few devices known
+        const engine = new IdentityEngine(
+          storage.identity,
+          { ...defaultModel(), matchProbability: 0.9 },
+          { newId: () => `v${++n}` },
+        )
+        return { storage, engine }
+      }
+
+      it('makes the two devices one: the older stays, the other is an alias, visits and signals move', async () => {
+        const { storage, engine } = await setupLowBar()
+        const chromeVisit = await visit(storage, engine, { at: 1_000_000, features: chrome() })
+        const separate = await visit(storage, engine, { at: 1_000_000 + minute, features: firefox() })
+        assert.notEqual(separate.visitorId, chromeVisit.visitorId, 'two devices exist, as without the switch')
+        const third = await visit(storage, engine, {
+          at: 1_000_000 + 2 * minute,
+          features: firefox(),
+          sameMachine: join,
+        })
+        assert.equal(third.visitorId, chromeVisit.visitorId, 'the older device stays')
+        assert.deepEqual(third.mergedExisting, { from: separate.visitorId, into: chromeVisit.visitorId })
+        assert.equal(third.matched, true)
+        assert.equal(await storage.identity.resolveAlias('t', separate.visitorId), chromeVisit.visitorId)
+        assert.equal(await storage.identity.getProfile('t', separate.visitorId), undefined, 'the other device is gone')
+        const profile = await storage.identity.getProfile('t', chromeVisit.visitorId)
+        assert.deepEqual([...(profile?.features.get('browserFamily')?.keys() ?? [])].sort(), ['chrome', 'firefox'])
+        assert.equal((await storage.identity.recentRequests('t', chromeVisit.visitorId, 10)).length, 3)
+        assert.equal((await storage.identity.getResolution('t', `r${counter}`))?.visitorId, chromeVisit.visitorId)
+        await storage.close()
+      })
+
+      it('is off by default: the two devices stay two', async () => {
+        const { storage, engine } = await setupLowBar()
+        const first = await visit(storage, engine, { at: 1_000_000, features: chrome() })
+        const second = await visit(storage, engine, { at: 1_000_000 + minute, features: firefox() })
+        const third = await visit(storage, engine, { at: 1_000_000 + 2 * minute, features: firefox() })
+        assert.equal(third.visitorId, second.visitorId)
+        assert.notEqual(third.visitorId, first.visitorId)
+        assert.equal(third.mergedExisting, undefined)
+        await storage.close()
+      })
+
+      it('does not join below the stronger bar', async () => {
+        const { storage, engine } = await setupLowBar()
+        const first = await visit(storage, engine, { at: 1_000_000, features: chrome() })
+        await visit(storage, engine, { at: 1_000_000 + minute, features: firefox() })
+        const third = await visit(storage, engine, {
+          at: 1_000_000 + 2 * minute,
+          features: firefox(),
+          sameMachine: { mergeExisting: true, mergeMinLogOdds: 50 },
+        })
+        assert.notEqual(third.visitorId, first.visitorId)
+        assert.equal(third.mergedExisting, undefined)
+        await storage.close()
+      })
+
+      it('does not let a visit that may not teach the engine join devices', async () => {
+        const { storage, engine } = await setupLowBar()
+        const first = await visit(storage, engine, { at: 1_000_000, features: chrome() })
+        await visit(storage, engine, { at: 1_000_000 + minute, features: firefox() })
+        const third = await visit(storage, engine, {
+          at: 1_000_000 + 2 * minute,
+          features: firefox(),
+          learn: false,
+          sameMachine: join,
+        })
+        assert.equal(third.mergedExisting, undefined)
+        assert.ok(await storage.identity.getProfile('t', first.visitorId))
+        await storage.close()
+      })
+    })
+
     it('does nothing when it is off', async () => {
       const { storage, engine } = await setup()
       await visit(storage, engine, { at: 1_000_000, features: chrome() })
@@ -431,6 +510,76 @@ describe('mergeTarget', () => {
   })
 })
 
+describe('mergeExistingTarget', () => {
+  const link = (visitorId: string, logOdds: number, browsers: string[]) => ({
+    visitorId,
+    logOdds,
+    browsers,
+    agree: [],
+    disagree: [],
+  })
+  const on = { ...defaultParams0, mergeExisting: true, mergeMinLogOdds: 6 }
+  const mine = new Set(['firefox'])
+
+  it('joins the strongest link when it reaches the bar, wins clearly, and shares no browser with the device', () => {
+    assert.equal(mergeExistingTarget({ links: [link('a', 8, ['chrome'])] }, on, 2, mine), 'a')
+  })
+
+  it('joins nothing when it is off, weak, a tie, a crowded address, or the two were seen in the same browser', () => {
+    assert.equal(
+      mergeExistingTarget({ links: [link('a', 8, ['chrome'])] }, { ...on, mergeExisting: false }, 2, mine),
+      undefined,
+    )
+    assert.equal(mergeExistingTarget({ links: [link('a', 5, ['chrome'])] }, on, 2, mine), undefined)
+    assert.equal(
+      mergeExistingTarget({ links: [link('a', 8, ['chrome']), link('b', 7.5, ['chrome'])] }, on, 2, mine),
+      undefined,
+    )
+    assert.equal(mergeExistingTarget({ links: [], skipped: 'shared_ip' }, on, 2, mine), undefined)
+    assert.equal(mergeExistingTarget({ links: [link('a', 8, ['chrome', 'firefox'])] }, on, 2, mine), undefined)
+    assert.equal(mergeExistingTarget(undefined, on, 2, mine), undefined)
+  })
+
+  it('is its own switch: the merge of new visits does not turn it on', () => {
+    assert.equal(
+      mergeExistingTarget({ links: [link('a', 8, ['chrome'])] }, { ...on, mergeExisting: false, merge: true }, 2, mine),
+      undefined,
+    )
+    assert.equal(mergeTarget({ links: [link('a', 8, ['chrome'])] }, { ...on, merge: false }, 2), undefined)
+  })
+})
+
+describe('withoutDevice', () => {
+  const own: DeviceProfile = {
+    deviceId: 'own',
+    visits: 1,
+    firstSeen: 1,
+    lastSeen: 1,
+    features: new Map([['screenResolution', new Map([['s1', { count: 1, lastSeen: 1 }]])]]),
+  }
+  const base = {
+    devices: 5,
+    devicesWithValue: (_f: string, v: string) => (v === 's1' ? 2 : 0),
+    agreementProbability: () => 0.4,
+  }
+
+  it('takes the device of the visit out of the count of devices and of the devices that have its values', () => {
+    const population = withoutDevice(base, own)
+    assert.equal(population.devices, 4)
+    assert.equal(population.devicesWithValue('screenResolution', 's1'), 1)
+    assert.equal(
+      population.devicesWithValue('screenResolution', 'other'),
+      0,
+      'a value it does not have is not touched, nor below zero',
+    )
+    assert.equal(population.agreementProbability('screenResolution'), 0.4)
+  })
+
+  it('leaves the population as it is when the visit has no device of its own', () => {
+    assert.equal(withoutDevice(base, undefined), base)
+  })
+})
+
 describe('findSameMachine', () => {
   const profile = (deviceId: string, features: Record<string, string>): DeviceProfile => ({
     deviceId,
@@ -455,6 +604,7 @@ describe('findSameMachine', () => {
     maxLinks: 3,
     merge: false,
     mergeMinLogOdds: 6,
+    mergeExisting: false,
   }
   const base = () => ({
     features: firefox(),

@@ -136,6 +136,20 @@ export const parameterHelp: Record<string, ParameterHelp> = {
     whileCollecting: 'Desligado.',
     flags: { attention: true, preview: 'none' },
   },
+  'identity.sameMachine.mergeExisting': {
+    title: 'Juntar aparelhos que já existem',
+    summary:
+      'Junta sozinho dois aparelhos antigos quando é quase certo que são a mesma máquina em navegadores diferentes. Desligado por padrão.',
+    what: '`identity.sameMachine.merge` só atua numa visita nova, que ia virar aparelho novo. Quando os dois navegadores já têm aparelho próprio, ele não faz nada. Esta chave faz o motor juntar os dois aparelhos que já existem, como se uma pessoa tivesse usado "Merge this device into that one": o **mais antigo fica**, as visitas e os sinais do outro passam para ele e o código do outro vira apelido do que ficou (o código antigo continua funcionando nas consultas).\n\nA condição é a mesma de `merge`: o mesmo IP em poucos minutos, só aparelhos vistos em outros navegadores, evidência acima de `identity.sameMachine.mergeMinLogOdds` e um vencedor claro. Além disso, os dois aparelhos não podem ter sido vistos na mesma família de navegador (dois Chrome são duas pessoas, não uma máquina).\n\nA resposta traz `mergedExisting: { from, into }`. Para desfazer, separe as visitas do aparelho no painel.',
+    useCases: [
+      'Situação: seus próprios aparelhos antigos (Chrome e Firefox) estão separados e você quer um código só. Faça: ligue, abra os dois navegadores pelo mesmo IP e depois desligue.',
+      'Situação: quer o menor risco de juntar pessoas. Faça: deixe desligado e use o botão "Merge" no painel caso a caso.',
+    ],
+    caution:
+      'Mexe no passado: visitas antigas passam a pertencer ao aparelho que ficou. Juntar duas pessoas é o erro mais caro (D78); o desfazer é manual e visita a visita.',
+    whileCollecting: 'Desligado.',
+    flags: { attention: true, preview: 'none' },
+  },
   'identity.sameMachine.mergeMinLogOdds': {
     title: 'Evidência mínima para usar o mesmo código (log-odds)',
     summary: 'A barra, mais alta que a de ligar, para uma visita usar o `visitorId` de outro navegador.',

@@ -47,3 +47,9 @@ Parâmetros novos (todos com ajuda em `help.ts`): `identity.sameMachine.{enabled
 Pedido do dono depois do deploy: o `visitorId` continuava diferente em cada navegador, que era o padrão de propósito. Entrou `identity.sameMachine.merge` (**desligado por padrão**) e `identity.sameMachine.mergeMinLogOdds` (6, provisório). Ligado, a visita usa o `visitorId` do outro navegador só com evidência acima da barra e um vencedor claro (`mergeTarget`, `identity/same_machine.ts`). Também entrou `samePerson` em cada visita da lista e o ícone discreto (⇄) na coluna Visitor, com dica e link.
 
 Verificado: 933 testes sem MySQL e 1052 com MySQL real; mutação nas três defesas (ligar mesmo desligado, barra, vencedor claro) e em `samePerson`; ícone, dica, clique e o clique não abrir o detalhe da linha, num Chrome real. A guarda de `learn` em `mergeTarget` é redundante com a da passada de mesma máquina, de propósito.
+
+## Adendo 2: juntar aparelhos que já existem (D106)
+
+Descoberta pelo dono em produção: com `merge` ligado os navegadores continuavam separados, porque cada um já tinha aparelho. Entrou `identity.sameMachine.mergeExisting` (**desligado por padrão**), que junta os dois aparelhos como o botão "Merge" quando a evidência passa de `mergeMinLogOdds` com vencedor claro e os aparelhos não dividem família de navegador. Achado no caminho: o aparelho da própria visita inflava a frequência dos valores da máquina (peso 1,08 virava 0,39), o que também escondia as ligações de visitas já casadas; corrigido (`withoutDevice`).
+
+Verificado: 947 testes sem MySQL e 1070 com MySQL real, lint limpo, mutação em 7 defesas. **Não testado com Chrome e Firefox reais contra a VPS.**

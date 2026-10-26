@@ -523,6 +523,13 @@ export const parameters: Parameter[] = [
       'Evidência mínima, em log-odds, para uma visita usar o `visitorId` de outro navegador (precisa ser maior que `identity.sameMachine.minLogOdds`, que só liga). Valor PROVISÓRIO: sem dados reais rotulados não existe número de precisão.',
   },
   {
+    path: 'identity.sameMachine.mergeExisting',
+    kind: { type: 'boolean' },
+    default: false,
+    description:
+      'Desligado por padrão. Ligado, uma visita que casou com um aparelho conhecido e é quase certamente a MESMA MÁQUINA de OUTRO aparelho já conhecido (visto só em outros navegadores) junta os dois aparelhos num só, como o botão "Merge" do painel: o aparelho mais antigo fica, as visitas e os sinais do outro passam para ele e o código antigo vira apelido. Usa a mesma barra (`identity.sameMachine.mergeMinLogOdds`) e exige um vencedor claro. Reescreve a quem pertencem visitas antigas, então é uma chave à parte de `identity.sameMachine.merge`.',
+  },
+  {
     path: 'identity.person.enabled',
     kind: { type: 'boolean' },
     default: true,

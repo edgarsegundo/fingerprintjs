@@ -4,8 +4,8 @@ import { decide, EngineOptions, ResolveParams, Settled, settle } from './decisio
 import { mergeProfiles, Observation, profileOf, withoutObservations } from './edit'
 import type { Features } from './features'
 import type { Model, PopulationStats } from './model'
-import { findSameMachine, mergeTarget } from './same_machine'
-import type { Activity, ActivityQuery, FeatureAnonymity, IdentityStore, Resolution } from './store'
+import { findSameMachine, mergeExistingTarget, mergeTarget, withoutDevice } from './same_machine'
+import type { Activity, ActivityQuery, DeviceProfile, FeatureAnonymity, IdentityStore, Resolution } from './store'
 
 export type { EngineOptions, ResolveParams } from './decision'
 
@@ -106,19 +106,27 @@ export class IdentityEngine {
       if (from === into) {
         return { ok: false, reason: 'same_device' } as const
       }
-      const [source, target] = await this.store.getProfiles(tenantId, [from, into])
-      if (!source || !target || source.deviceId !== from || target.deviceId !== into) {
-        return { ok: false, reason: 'unknown_device' } as const
-      }
-      const merged = mergeProfiles(target, source)
-      await this.store.applyEdit(tenantId, {
-        remove: [from],
-        write: [merged],
-        moveVisits: { to: into, from },
-        alias: { from, to: into, at: this.now() },
-      })
-      return { ok: true, visitorId: into, visits: merged.visits } as const
+      const merged = await this.mergeDevices(tenantId, from, into)
+      return merged
+        ? ({ ok: true, visitorId: into, visits: merged.visits } as const)
+        : ({ ok: false, reason: 'unknown_device' } as const)
     })
+  }
+
+  /** The work of a merge, for the turn that already holds the tenant: `from` becomes `into`, with both histories */
+  private async mergeDevices(tenantId: string, from: string, into: string): Promise<DeviceProfile | undefined> {
+    const [source, target] = await this.store.getProfiles(tenantId, [from, into])
+    if (!source || !target || source.deviceId !== from || target.deviceId !== into) {
+      return undefined
+    }
+    const merged = mergeProfiles(target, source)
+    await this.store.applyEdit(tenantId, {
+      remove: [from],
+      write: [merged],
+      moveVisits: { to: into, from },
+      alias: { from, to: into, at: this.now() },
+    })
+    return merged
   }
 
   /**
@@ -191,6 +199,7 @@ export class IdentityEngine {
     at: number,
     settings: Settled,
     population: PopulationStats,
+    own?: DeviceProfile,
   ) {
     const params = settings.sameMachine
     if (!params.enabled || !features.ip || !features.browserFamily) {
@@ -211,7 +220,15 @@ export class IdentityEngine {
             tenantId,
             others.map((item) => item.deviceId),
           )
-    return findSameMachine({ features, visitorId, seen, profiles, population, model: settings.model, params })
+    return findSameMachine({
+      features,
+      visitorId,
+      seen,
+      profiles,
+      population: withoutDevice(population, own),
+      model: settings.model,
+      params,
+    })
   }
 
   async resolve(
@@ -240,14 +257,50 @@ export class IdentityEngine {
       // Only a visit that is trusted to teach the engine may link machines: a link feeds the person layer.
       // It is extra evidence: if the store cannot answer, the visit still gets its identity, without the link
       const sameMachine = settings.learn
-        ? await this.sameMachine(tenantId, features, visitorId, at, settings, population).catch(() => undefined)
+        ? await this.sameMachine(
+            tenantId,
+            features,
+            visitorId,
+            at,
+            settings,
+            population,
+            matched ? candidates.find((profile) => profile.deviceId === visitorId) : undefined,
+          ).catch(() => undefined)
         : undefined
       const target =
         matched || !settings.learn
           ? undefined
           : mergeTarget(sameMachine, settings.sameMachine, settings.ambiguityMargin)
-      const finalId = target ?? visitorId
+      // A visit attached to a known device that is also the same machine as another known device: one device, if asked
+      const mine = matched ? candidates.find((profile) => profile.deviceId === visitorId) : undefined
+      const other =
+        mine && settings.learn
+          ? mergeExistingTarget(
+              sameMachine,
+              settings.sameMachine,
+              settings.ambiguityMargin,
+              new Set(mine.features.get('browserFamily')?.keys() ?? []),
+            )
+          : undefined
+      const theirs = other ? await this.store.getProfile(tenantId, other) : undefined
+      // The older device stays: its id is the one that the tenant has had the longest
+      const wanted =
+        mine && theirs && other
+          ? mine.firstSeen <= theirs.firstSeen
+            ? { from: other, into: visitorId }
+            : { from: visitorId, into: other }
+          : undefined
+      // Extra work on top of the decision: if it fails, the visit keeps the device that it matched
+      const join =
+        wanted && (await this.mergeDevices(tenantId, wanted.from, wanted.into).catch(() => undefined))
+          ? wanted
+          : undefined
+      const finalId = join?.into ?? target ?? visitorId
       const answer: Resolution = { ...resolution, ...(sameMachine ? { sameMachine } : {}) }
+      if (join) {
+        answer.visitorId = join.into
+        answer.mergedExisting = join
+      }
       if (target) {
         // Taking the id of the other device: the device that the visit was refused is no longer a "possible link"
         delete answer.possibleLink
