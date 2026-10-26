@@ -9,7 +9,10 @@ import { bearerMatches, HttpError, readBody, reply, Res } from './http_util'
 import type { IdentityEngine } from './identity/engine'
 import type { Req } from './net/signals'
 import { ipHashKey, protectIp } from './privacy/ip_policy'
+import { buildCatalog, helpCoverage } from './settings/catalog'
+import { readOnlyParameters } from './settings/help'
 import type { Settings, SettingsRegistry } from './settings/settings'
+import { copyPaths, tenantSettingsView } from './settings/tenant_view'
 import type { EventStore } from './store/types'
 import type { TenantRecord, TenantStore } from './tenants/store'
 import { monthOf, UsageMeter } from './usage/meter'
@@ -161,6 +164,10 @@ export function createAdminHandler(deps: AdminDeps) {
     if (!isRecord(tenantSettings)) {
       throw new HttpError(400, { error: 'invalid_parameter', parameter: 'settings' })
     }
+    // `hideSecrets` shows webhook secrets as "[hidden]". Saving that text back would replace the real secrets with it.
+    if (JSON.stringify(tenantSettings).includes('"[hidden]"')) {
+      throw new HttpError(400, { error: 'hidden_placeholder', detail: 'a secret was sent back as "[hidden]"' })
+    }
     const problems = settings.problemsOfTenantSettings(tenantSettings, plan)
     if (problems.length > 0) {
       throw new HttpError(400, { error: 'invalid_settings', problems: problems.slice(0, 20) })
@@ -229,7 +236,7 @@ export function createAdminHandler(deps: AdminDeps) {
   async function updateTenant(req: Req, res: Res, id: string, address: string) {
     const current = await stored(id)
     const body = await bodyOf(req)
-    checkFields(body, ['name', 'plan', 'allowedOrigins', 'settings', 'status'])
+    checkFields(body, ['name', 'plan', 'allowedOrigins', 'settings', 'status', 'keepReadOnly'])
     const next: TenantRecord = { ...current, updatedAt: now() }
     if (body.name !== undefined) {
       if (body.name !== null && (typeof body.name !== 'string' || body.name.length > 100)) {
@@ -250,7 +257,13 @@ export function createAdminHandler(deps: AdminDeps) {
       next.status = body.status
     }
     // The settings are checked together with the plan they will sit on, even if only one of them changed
-    next.settings = checkSettings(body.settings ?? current.settings, next.plan)
+    // The settings panel never sees the secrets of the parameters that it only shows (webhook endpoints), so it asks to
+    // keep what the tenant has for them, instead of sending them back
+    let candidate = body.settings ?? current.settings
+    if (body.keepReadOnly === true && isRecord(candidate)) {
+      candidate = copyPaths(current.settings, candidate, readOnlyParameters)
+    }
+    next.settings = checkSettings(candidate, next.plan)
     await tenantStore.update(next)
     await changed(id)
     await record(id, 'admin.tenant.update', Object.keys(body).join(','), address, 200)
@@ -325,6 +338,32 @@ export function createAdminHandler(deps: AdminDeps) {
     return { route: 'admin_tenant', tenantId: id, status: 200 }
   }
 
+  /** Every parameter with its explanation, so that the settings panel can draw the fields */
+  function parameterCatalog(res: Res) {
+    reply(res, 200, { parameters: buildCatalog(), coverage: helpCoverage() })
+    return { route: 'admin_parameters', status: 200 }
+  }
+
+  /** The settings of one tenant by parameter: what it sets, what it falls back to, and where each value comes from */
+  function tenantSettings(res: Res, id: string) {
+    const tenant = settings.tenants.find(id)
+    if (!tenant) {
+      throw new HttpError(404, { error: 'not_found' })
+    }
+    const paths = buildCatalog().map((entry) => entry.path)
+    const byLayer = tenantSettingsView(settings, tenant, paths)
+    reply(res, 200, {
+      tenant: view(tenant),
+      // A tenant of the configuration file cannot be changed through the API
+      editable: tenant.source === 'database',
+      overrides: hideSecrets(byLayer.overrides),
+      effective: hideSecrets(byLayer.effective),
+      inherited: hideSecrets(byLayer.inherited),
+      origins: byLayer.origins,
+    })
+    return { route: 'admin_tenant_settings', tenantId: id, status: 200 }
+  }
+
   async function usage(res: Res, url: URL) {
     const month = url.searchParams.get('month') ?? monthOf(now())
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
@@ -382,6 +421,19 @@ export function createAdminHandler(deps: AdminDeps) {
         return createTenant(req, res, address)
       }
       throw notAllowed('GET, POST')
+    }
+    if (path === '/parameters') {
+      if (method !== 'GET') {
+        throw notAllowed('GET')
+      }
+      return parameterCatalog(res)
+    }
+    const settingsMatch = /^\/tenants\/([A-Za-z0-9_-]{1,64})\/settings$/.exec(path)
+    if (settingsMatch) {
+      if (method !== 'GET') {
+        throw notAllowed('GET')
+      }
+      return tenantSettings(res, settingsMatch[1])
     }
     if (path === '/usage') {
       if (method !== 'GET') {

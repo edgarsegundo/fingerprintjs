@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
 import { dashboardIndex, dashboardScript, dashboardStyle } from './dashboard/assets'
+import { configIndex, configScript, configStyle } from './dashboard/config_assets'
 
 export interface StaticFile {
   type: string
@@ -64,11 +65,17 @@ export function dashboardFiles(): Record<string, StaticFile> {
     csp: dashboardCsp,
   })
   const index = page(dashboardIndex, 'text/html; charset=utf-8')
+  const configPage = page(configIndex, 'text/html; charset=utf-8')
   return {
     '/dashboard': index,
     '/dashboard/': index,
     '/dashboard/app.js': page(dashboardScript, 'text/javascript; charset=utf-8'),
     '/dashboard/style.css': page(dashboardStyle, 'text/css; charset=utf-8'),
+    // The settings panel: it logs in with the key of the operator and changes the settings of the tenants
+    '/dashboard/config': configPage,
+    '/dashboard/config/': configPage,
+    '/dashboard/config/app.js': page(configScript, 'text/javascript; charset=utf-8'),
+    '/dashboard/config/style.css': page(configStyle, 'text/css; charset=utf-8'),
   }
 }
 

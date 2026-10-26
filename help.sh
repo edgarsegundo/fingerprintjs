@@ -51,6 +51,19 @@ db_password() {
   printf '%s' "${value//\"/}" # remove aspas, se houver
 }
 
+# Prints the address of the settings panel and the key of the operator, to copy into the page. The key comes from the
+# .env as FP_ADM_KEY (migrate-tenants.sh offers to save it there).
+admin_key() {
+  load_env || return 1
+  if [ -z "${FP_ADM_KEY:-}" ]; then
+    echo "Não achei FP_ADM_KEY no .env. Acrescente uma linha:  FP_ADM_KEY=adm_..."
+    return 1
+  fi
+  echo "Painel de configuração: https://id.empregoaqui.com.br:8443/dashboard/config"
+  echo "Chave de operador (cole no campo e clique em Entrar):"
+  echo "$FP_ADM_KEY"
+}
+
 # Prints the dashboard address and the secret key of a tenant, to copy into the page. The key comes from the .env as
 # FP_SK_<TENANT> (upper case, "-" as "_"), for example FP_SK_PWA.
 dashboard_key() {
@@ -549,7 +562,8 @@ while true; do
   echo "4) Quem não alcançou o servidor (porta bloqueada, bloqueadores)"
   echo "5) Saúde: containers, certificado, disco, tamanho do banco"
   echo "6) Logs do servidor"
-  echo "7) Chave do painel (copiar e colar em /dashboard/)"
+  echo "7) Chave do painel de visitas (copiar e colar em /dashboard/)"
+  echo "8) Chave do painel de configuração (copiar e colar em /dashboard/config)"
   echo "q) Sair"
   read -r -p "Choose an option: " opt
   echo "..."
@@ -571,6 +585,7 @@ while true; do
     5) health ;;
     6) logs ;;
     7) dashboard_key ;;
+    8) admin_key ;;
     q|Q) exit 0 ;;
     *) echo "Invalid option." ;;
   esac

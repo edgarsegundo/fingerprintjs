@@ -31,7 +31,7 @@ const show = (value: unknown): string => (value === null ? '`null`' : `\`${JSON.
 
 const escapeCell = (text: string) => text.replace(/\|/g, '\\|').replace(/\n/g, ' ')
 
-const sectionTitles: Record<string, string> = {
+export const sectionTitles: Record<string, string> = {
   nonce: 'Desafio (nonce)',
   limits: 'Limites',
   api: 'API de consulta',

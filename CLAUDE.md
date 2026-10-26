@@ -51,7 +51,8 @@ Para a decisão do banco e os cuidados em produção: `mysql-ou-sqlite-decisao-e
 | `server/` | Servidor de ingestão (Fase 2), TypeScript para Node 22, sem dependência de execução com SQLite; o MySQL (banco de produção, D79) usa só o driver opcional `mysql2`. Veja `server/README.md`. |
 | `server/src/net/`, `tls/`, `ingest/`, `store/` | Sinais de rede (IP, cabeçalhos, HTTP/2), JA4 e front TLS, validação e nonce, armazenamento. |
 | `server/src/identity/` | Motor de matching (Fase 3): características, modelo, motor, armazenamento, ajuste. |
-| `server/src/settings/` | Configuração: tabela única de parâmetros, camadas, validação, recarga, referência gerada (`docs/configuracao.md`). |
+| `server/src/settings/` | Configuração: tabela única de parâmetros, camadas, validação, recarga, referência gerada (`docs/configuracao.md`). `help.ts` (explicação longa de cada parâmetro, vista no painel), `help_pending.ts` (os que faltam; só encolhe), `catalog.ts` e `tenant_view.ts` (o que o painel lê). |
+| `server/src/dashboard/` | Painel de visitas (`assets.ts`, chave `sk_`) e painel de configuração (`config_assets.ts`, `/dashboard/config`, chave de operador `adm_`). HTML/CSS/JS embutidos, CSP estrita, sem `innerHTML`. |
 | `server/src/webhooks/`, `sdk/`, `dashboard/` | Entrega de webhooks (fila, assinatura, rede segura), SDK de Node e painel (Fase 6). |
 | `server/src/privacy/`, `audit/` | Forma do IP guardado e registro de acessos (Fase 7). Modelos jurídicos em `docs/plano/privacidade/`. |
 | `server/src/risk/` | Risco composto, fatos e regras de decisão (Fase 5), sempre por parâmetros do tenant. |
@@ -92,6 +93,7 @@ node server/dist/cli.js reachability-receiver --db reach.db --port 8090 --allowe
 node server/dist/cli.js reachability-summary --db reach.db --days 30   # resumo desses avisos, em português
 node server/dist/cli.js migrate-sqlite --from events.db --config cfg-mysql.json   # copia um SQLite para o MySQL e confere
 node server/dist/cli.js delete-linked --config cfg.json --tenant <id> --linked-id <codigo>  # retirada de participante
+node server/dist/cli.js import-tenants --config cfg.json [--dry-run]   # copia os tenants do arquivo para o banco, com as mesmas chaves (depois tire "tenants" do arquivo)
 docker build -f server/Dockerfile -t fingerprint-server .   # na raiz do repositório
 ```
 
@@ -135,6 +137,8 @@ docker build -f server/Dockerfile -t fingerprint-server .   # na raiz do reposit
 17. **Todo número de comportamento é parâmetro** (D41). Limite, limiar, janela, tamanho e política entram em
     `server/src/settings/parameters.ts`, com padrão, faixa e descrição, valem por tenant e se recarregam com `SIGHUP`.
     Depois regenere `docs/configuracao.md` (um teste falha se ela envelhecer). Nada de constante solta no código de decisão.
+   **Parâmetro novo também leva explicação longa** em `server/src/settings/help.ts` (ou entra em `help_pending.ts`, que só pode
+   encolher): um teste falha se o parâmetro não está em nenhum dos dois. Veja `docs/plano/painel-de-configuracao-...md`.
 
 ## Convenções de código
 

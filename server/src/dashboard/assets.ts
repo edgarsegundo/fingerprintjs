@@ -20,6 +20,7 @@ export const dashboardIndex = `<!doctype html>
 <body>
 <header>
   <h1>Visitors</h1>
+  <a href="/dashboard/config">Settings</a>
   <form id="connect" autocomplete="off">
     <label for="key">Secret key</label>
     <input id="key" type="password" placeholder="sk_..." autocomplete="off" spellcheck="false" required>

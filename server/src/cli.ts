@@ -19,6 +19,7 @@ import { renderSummary, summarize } from './reachability/summary'
 import { renderReference, renderRulesReference } from './settings/reference'
 import { openStorage, Storage } from './storage'
 import { EventCursor, StoredEvent } from './store/types'
+import { importFileTenants } from './tenants/import'
 
 const usage = `Usage:
   node server/dist/cli.js new-tenant <id>
@@ -45,6 +46,9 @@ const usage = `Usage:
   node server/dist/cli.js migrate-sqlite --from <events.db> [--config file] [--append]
       copies a SQLite database of this server into the MySQL database of the configuration, counts the counters of the
       identity again and checks the result. The MySQL database must be empty (--append to add to one that is not)
+  node server/dist/cli.js import-tenants [--config file] [--dry-run]
+      copies the tenants of the config file into the database with the SAME keys, so they can be changed in the settings
+      panel. Then remove "tenants" from the file. Safe to run again: a tenant already in the database is not touched
   node server/dist/cli.js delete-linked --tenant <id> --linked-id <id> [--config file]
       deletes every event with that linkedId (a participant who withdraws, or a data subject request)
   node server/dist/cli.js reachability-receiver --db <file> [--port 8090] [--host 127.0.0.1] [--path /report]
@@ -341,6 +345,34 @@ async function migrateSqlite(options: Record<string, string | true>): Promise<vo
   }
 }
 
+async function importTenants(options: Record<string, string | true>): Promise<void> {
+  const configFile =
+    text(options.config) ?? process.env.FP_CONFIG ?? fail('import-tenants needs --config <file> or FP_CONFIG')
+  const config = loadConfig(configFile)
+  if (config.tenants.length === 0) {
+    return fail('The configuration file has no tenants to copy.')
+  }
+  const storage = await openExisting(config)
+  try {
+    const dryRun = options['dry-run'] === true
+    const report = await importFileTenants(config.tenants, storage.tenants, Date.now(), { dryRun })
+    for (const id of report.imported) {
+      process.stderr.write(`${dryRun ? 'would copy' : 'copied'}: ${id}\n`)
+    }
+    for (const item of report.skipped) {
+      process.stderr.write(`left alone: ${item.id} (${item.reason})\n`)
+    }
+    process.stderr.write(
+      dryRun
+        ? 'Dry run: nothing was written.\n'
+        : 'Done. Now remove "tenants" from the configuration file and restart the server: while a tenant is in the\n' +
+            'file, the file wins and the tenant cannot be changed through the API.\n',
+    )
+  } finally {
+    await storage.close()
+  }
+}
+
 const list = (value: string | true | undefined): string[] =>
   typeof value === 'string'
     ? value
@@ -471,6 +503,8 @@ if (command === 'new-tenant' && positional[1] && /^[A-Za-z0-9_-]{1,64}$/.test(po
   evaluateIdentityCommand(positional, options)
 } else if (command === 'migrate-sqlite') {
   run(migrateSqlite(options))
+} else if (command === 'import-tenants') {
+  run(importTenants(options))
 } else if (command === 'delete-linked') {
   run(deleteLinked(options))
 } else if (command === 'eval') {
