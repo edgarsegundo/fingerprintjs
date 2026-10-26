@@ -70,6 +70,7 @@ sudo tee "$CONFIG" >/dev/null <<EOF
 {
   "listen": { "host": "0.0.0.0", "port": 8443 },
   "tls": { "certFile": "/config/cert.pem", "keyFile": "/config/key.pem" },
+  "dashboard": true,
   "nonceSecret": "$NONCE_SECRET",
   "ipHashSecret": "$IP_HASH_SECRET",
   "database": {
