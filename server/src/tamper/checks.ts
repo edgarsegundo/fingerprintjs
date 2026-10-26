@@ -308,25 +308,64 @@ const nativeFunctionsModified: Check = (event) => {
   }
 }
 
+/**
+ * What a page reads to tell devices apart. A tool that fakes a device sets these straight on `navigator`. A polyfill or
+ * an extension adds other names (`share`, `canShare`...), which say nothing about who the visitor is.
+ */
+const identityNavigatorProperties = new Set([
+  'appVersion',
+  'cpuClass',
+  'deviceMemory',
+  'doNotTrack',
+  'hardwareConcurrency',
+  'language',
+  'languages',
+  'maxTouchPoints',
+  'mimeTypes',
+  'oscpu',
+  'platform',
+  'plugins',
+  'product',
+  'productSub',
+  'userAgent',
+  'userAgentData',
+  'vendor',
+  'vendorSub',
+  'webdriver',
+])
+
 const navigatorOverridden: Check = (event) => {
   const integrity = extended(event, 'nativeIntegrity')
   if (!isObject(integrity)) {
     return undefined
   }
-  const own = [
-    ...(Array.isArray(integrity.navigatorOwnProperties)
-      ? integrity.navigatorOwnProperties.map((name) => `navigator.${name}`)
-      : []),
-    ...(Array.isArray(integrity.screenOwnProperties)
-      ? integrity.screenOwnProperties.map((name) => `screen.${name}`)
-      : []),
+  const navigatorNames: string[] = Array.isArray(integrity.navigatorOwnProperties)
+    ? integrity.navigatorOwnProperties.filter((name): name is string => typeof name === 'string')
+    : []
+  const screenNames: string[] = Array.isArray(integrity.screenOwnProperties)
+    ? integrity.screenOwnProperties.filter((name): name is string => typeof name === 'string')
+    : []
+  // Nothing is added to `screen` by a polyfill, so any own property of it counts
+  const identity = [
+    ...navigatorNames.filter((name) => identityNavigatorProperties.has(name)).map((name) => `navigator.${name}`),
+    ...screenNames.map((name) => `screen.${name}`),
   ]
-  return own.length === 0
+  if (identity.length > 0) {
+    return {
+      id: 'navigator_overridden_on_instance',
+      severity: 'high',
+      detail: `Values were set straight on the object: ${identity.slice(0, 5).join(', ')}.`,
+    }
+  }
+  const other = navigatorNames.map((name) => `navigator.${name}`)
+  return other.length === 0
     ? undefined
     : {
         id: 'navigator_overridden_on_instance',
-        severity: 'high',
-        detail: `Values were set straight on the object: ${own.slice(0, 5).join(', ')}.`,
+        severity: 'low',
+        detail:
+          'Names that do not identify the device were added straight on the object ' +
+          `(a polyfill or an extension does this): ${other.slice(0, 5).join(', ')}.`,
       }
 }
 

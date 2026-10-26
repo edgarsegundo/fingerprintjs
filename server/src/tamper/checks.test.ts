@@ -405,6 +405,44 @@ describe('integrity and automation', () => {
     assert.match(result.signals[0].detail, /navigator\.userAgent/)
   })
 
+  it('does not call a name that a polyfill or an extension adds (share) high: it says nothing about the device', () => {
+    for (const names of [['share'], ['canShare', 'share']]) {
+      const event = cleanEvent()
+      ;(event.payload.extended.nativeIntegrity.value as Record<string, unknown>).navigatorOwnProperties = names
+      const result = checkTamper(event)
+      assert.deepEqual(
+        result.signals.map((item) => [item.id, item.severity]),
+        [['navigator_overridden_on_instance', 'low']],
+        names.join(),
+      )
+      assert.equal(result.counts.high, 0)
+    }
+  })
+
+  it('stays high when a name that identifies the device is set next to a harmless one', () => {
+    const event = cleanEvent()
+    ;(event.payload.extended.nativeIntegrity.value as Record<string, unknown>).navigatorOwnProperties = [
+      'share',
+      'hardwareConcurrency',
+    ]
+    const result = checkTamper(event)
+    assert.deepEqual(
+      result.signals.map((item) => [item.id, item.severity]),
+      [['navigator_overridden_on_instance', 'high']],
+    )
+    assert.match(result.signals[0].detail, /navigator\.hardwareConcurrency/)
+    assert.doesNotMatch(result.signals[0].detail, /navigator\.share/)
+  })
+
+  it('stays high for any value set straight on screen', () => {
+    const event = cleanEvent()
+    ;(event.payload.extended.nativeIntegrity.value as Record<string, unknown>).screenOwnProperties = ['width']
+    assert.deepEqual(
+      checkTamper(event).signals.map((item) => [item.id, item.severity]),
+      [['navigator_overridden_on_instance', 'high']],
+    )
+  })
+
   it('flags each automation trace', () => {
     for (const change of [
       { webdriver: true },
