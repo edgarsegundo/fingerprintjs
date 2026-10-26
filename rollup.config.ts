@@ -72,6 +72,28 @@ const config: RollupOptions[] = [
     ],
   },
 
+  // The loader: a separate, tiny file that you serve from your own site. It loads the collector and reports when
+  // the collector could not be reached, which the collector itself cannot do. See docs/collector.md.
+  {
+    input: 'src/loader/index.ts',
+    plugins: [nodeResolvePlugin(), typescriptPlugin()],
+    output: [
+      {
+        ...commonOutput,
+        name: 'FpLoader',
+        file: `${outputDirectory}/fp-loader.js`,
+        format: 'iife',
+      },
+      {
+        ...commonOutput,
+        name: 'FpLoader',
+        file: `${outputDirectory}/fp-loader.min.js`,
+        format: 'iife',
+        plugins: [commonTerser, ...commonOutput.plugins],
+      },
+    ],
+  },
+
   // NPM bundles. They have all the dependencies excluded for end code size optimization.
   {
     ...commonInput,

@@ -95,6 +95,8 @@ Legenda do estado: **feito**, **parcial**, **pendente**, **não fazer**.
 | Protocolo ético e página de coleta com consentimento | feito | `tools/calibration/`, `docs/plano/` | alto | médio | médio | **Dados reais pendentes** |
 | Benchmark aberto reprodutível | pendente | n/a | alto | médio | médio | Ideia I7 |
 | Relatório de deriva por característica | feito | `server/src/drift/` | alto | médio | baixo | D75. Dica para olhar, não alarme |
+| Medir quem não alcança o servidor (carregador, aviso de falha, receptor sem IP, resumo, ASN opcional) | feito | `src/loader/`, `server/src/reachability/`, `server/src/net/asn.ts` | médio | médio | baixo | D96, D97. Causa é estimativa; Safari não testado |
+| Porta 443 para o fingerprint (SNI, segundo IP, reserva) | só documentado | `docs/plano/usar-a-porta-443-...md` | médio | alto | **alto** | D98. Adiado por decisão do dono; nada testado |
 
 ## Privacidade e conformidade
 

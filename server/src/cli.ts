@@ -13,6 +13,9 @@ import { defaultModel, parseModel } from './identity/model'
 import { migrateSqliteToMysql } from './migrate'
 import { defaultListUrls, ListKind, parseList, renderList } from './net/ip_lists'
 import { summarizeEvent } from './ops'
+import { startReceiver } from './reachability/run'
+import { ReportStore } from './reachability/store'
+import { renderSummary, summarize } from './reachability/summary'
 import { renderReference, renderRulesReference } from './settings/reference'
 import { openStorage, Storage } from './storage'
 import { EventCursor, StoredEvent } from './store/types'
@@ -44,6 +47,14 @@ const usage = `Usage:
       identity again and checks the result. The MySQL database must be empty (--append to add to one that is not)
   node server/dist/cli.js delete-linked --tenant <id> --linked-id <id> [--config file]
       deletes every event with that linkedId (a participant who withdraws, or a data subject request)
+  node server/dist/cli.js reachability-receiver --db <file> [--port 8090] [--host 127.0.0.1] [--path /report]
+                                         [--allowed-origin https://app.example.com] [--trust-forwarded-from 172.16.0.0/12]
+                                         [--asn-file networks.csv --asn-from 0 [--asn-to 1] --asn-number 2 --asn-name 3]
+                                         [--keep-days 90] [--rate-per-ip 30] [--rate-total 600] [--secret-file file]
+      receives the reports that the loader of a page sends when the collector could not be reached (blocked port,
+      blocker). It keeps no address: see docs/plano/detectar-bloqueio-da-porta-8443-e-do-coletor-*.md
+  node server/dist/cli.js reachability-summary --db <file> [--days 30] [--utc-offset -3] [--json]
+      counts those reports: by reason, browser, hour of the day and network
   node server/dist/cli.js eval <dataset> [--out report.md] [--json report.json] [--seed n]
                                          [--threshold x] [--target-fmr x]
       measures the id of the original library on a dataset (run "yarn build" first)
@@ -330,6 +341,67 @@ async function migrateSqlite(options: Record<string, string | true>): Promise<vo
   }
 }
 
+const list = (value: string | true | undefined): string[] =>
+  typeof value === 'string'
+    ? value
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item !== '')
+    : []
+
+const optionalColumn = (value: string | true | undefined, name: string): number | undefined =>
+  value === undefined ? undefined : number(value, name, 0)
+
+async function reachabilityReceiver(options: Record<string, string | true>): Promise<void> {
+  const asnFile = text(options['asn-file'])
+  const receiver = await startReceiver({
+    db: text(options.db) ?? fail('reachability-receiver needs --db <file>'),
+    port: number(options.port, 'port', 8090),
+    host: text(options.host) ?? '127.0.0.1',
+    path: text(options.path),
+    allowedOrigins: list(options['allowed-origin']),
+    trustForwardedFrom: list(options['trust-forwarded-from']),
+    asnFile,
+    asnColumns:
+      asnFile === undefined
+        ? undefined
+        : {
+            from: number(options['asn-from'], 'asn-from', 0),
+            to: optionalColumn(options['asn-to'], 'asn-to'),
+            asn: optionalColumn(options['asn-number'], 'asn-number'),
+            name: optionalColumn(options['asn-name'], 'asn-name'),
+          },
+    keepDays: number(options['keep-days'], 'keep-days', 90),
+    ratePerIp: options['rate-per-ip'] === undefined ? undefined : number(options['rate-per-ip'], 'rate-per-ip', 30),
+    rateTotal: options['rate-total'] === undefined ? undefined : number(options['rate-total'], 'rate-total', 600),
+    secretFile: text(options['secret-file']),
+  })
+  process.stderr.write(`Receiver listening on ${text(options.host) ?? '127.0.0.1'}:${receiver.port}\n`)
+  const stop = () => {
+    receiver.close().then(
+      () => process.exit(0),
+      () => process.exit(1),
+    )
+  }
+  process.on('SIGTERM', stop)
+  process.on('SIGINT', stop)
+}
+
+function reachabilitySummary(options: Record<string, string | true>): void {
+  const file = text(options.db) ?? fail('reachability-summary needs --db <file>')
+  if (!existsSync(file)) {
+    fail(`There is no database file at "${file}"`)
+  }
+  const store = new ReportStore(file)
+  const summary = summarize(store, {
+    days: number(options.days, 'days', 30),
+    now: Date.now(),
+    utcOffsetHours: number(options['utc-offset'], 'utc-offset', -3),
+  })
+  store.close()
+  out(options.json === true ? JSON.stringify(summary, null, 2) : renderSummary(summary).trimEnd())
+}
+
 /** Runs a command that waits for the database; a failure ends the program with the reason */
 function run(work: Promise<void>): void {
   work.catch((error: unknown) => {
@@ -368,6 +440,10 @@ if (command === 'new-tenant' && positional[1] && /^[A-Za-z0-9_-]{1,64}$/.test(po
   run(exportEvents(options))
 } else if (command === 'last-events') {
   run(lastEvents(options))
+} else if (command === 'reachability-receiver') {
+  run(reachabilityReceiver(options))
+} else if (command === 'reachability-summary') {
+  reachabilitySummary(options)
 } else if (command === 'config-reference') {
   const target = text(options.out)
   if (target) {

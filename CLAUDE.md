@@ -29,10 +29,17 @@ dava para fazer sem dados reais ([relatório](docs/plano/fases/fase-10-sem-dados
 - **Navegadores anti-detecção profissionais** nunca foram testados contra a evidência de adulteração.
 - **Faturamento, painel de cliente com login, DPA e SLA** do SaaS não existem.
 - **Escala:** o banco de produção é o MySQL (D79); medido só em notebook, cerca de 30 visitas por segundo (D82). Vários servidores sobre um MySQL funcionam e foram testados com dois (D89). A busca de candidatos foi medida até 1 milhão de aparelhos **inventados** (D90): só latência.
+- **Medir quem não alcança o servidor** (porta 8443 bloqueada, bloqueadores): carregador, receptor de avisos e resumo existem e foram testados (D96, D97); **Safari e uma rede que bloqueia a porta de verdade não foram verificados**. A mudança para a porta 443 está só documentada (D98) e o dono decidiu não arriscar o nginx compartilhado.
 - **Pesquisa** (`docs/plano/01-pesquisa-e-fontes.md`) foi mais rasa que o pedido original: cerca de 30 buscas.
 
 Documentos do plano: `01-pesquisa-e-fontes`, `02-inventario-de-capacidades`, `03-ideias-inovadoras`,
 `05-riscos-privacidade-e-compliance`, `06-fechamento-e-autocritica` (comece por este), `decisoes.md` (D1 a D95), relatórios em `docs/plano/fases/`.
+Para evoluir a busca de candidatos quando houver dados reais: `busca-de-candidatos-v2-como-evoluir-com-dados-reais`.
+Para vender a vários clientes (domínio do cliente, CNAME, SNI): `vender-para-varios-clientes-dominio-do-cliente-cname-subdominio-first-party-ja4-sni-certificado-por-cliente-proxy-do-cliente`.
+Para instalar na VPS (`id.empregoaqui.com.br`, passo a passo): `instalar-na-vps-passo-a-passo-id-empregoaqui-com-br-docker-tls-mysql-certificado-letsencrypt-coletor-no-pwa-fase-de-observacao`.
+Para medir quem não alcança o servidor (porta 8443 bloqueada, bloqueadores): `detectar-bloqueio-da-porta-8443-e-do-coletor-aviso-de-falha-loader-receptor-asn-lgpd`.
+Para usar a porta 443 sem derrubar o nginx (adiado, não recomendado agora): `usar-a-porta-443-para-o-fingerprint-sem-derrubar-o-nginx-sni-stream-ssl-preread-proxy-protocol-segundo-ip-opcoes-e-riscos`.
+Para a decisão do banco e os cuidados em produção: `mysql-ou-sqlite-decisao-e-cuidados-em-producao-vps-compartilhada-retencao-conexoes-disco-backup`.
 
 ## Mapa do repositório
 
@@ -40,6 +47,7 @@ Documentos do plano: `01-pesquisa-e-fontes`, `02-inventario-de-capacidades`, `03
 |---|---|
 | `src/` | Biblioteca do navegador. `src/sources/` são as 42 fontes originais, `src/agent.ts` é o `load()/get()` legado. |
 | `src/collector/` | Coletor novo (Fase 1): `collect()`, `send()`, fontes extras em `sources/`. |
+| `src/loader/` | Carregador (`dist/fp-loader.min.js`, global `FpLoader`): serve do site do cliente, carrega o coletor e avisa quando ele não é alcançado. |
 | `server/` | Servidor de ingestão (Fase 2), TypeScript para Node 22, sem dependência de execução com SQLite; o MySQL (banco de produção, D79) usa só o driver opcional `mysql2`. Veja `server/README.md`. |
 | `server/src/net/`, `tls/`, `ingest/`, `store/` | Sinais de rede (IP, cabeçalhos, HTTP/2), JA4 e front TLS, validação e nonce, armazenamento. |
 | `server/src/identity/` | Motor de matching (Fase 3): características, modelo, motor, armazenamento, ajuste. |
@@ -49,6 +57,7 @@ Documentos do plano: `01-pesquisa-e-fontes`, `02-inventario-de-capacidades`, `03
 | `server/src/risk/` | Risco composto, fatos e regras de decisão (Fase 5), sempre por parâmetros do tenant. |
 | `server/src/tamper/` | Evidência de adulteração (Fase 4): 16 verificações puras e a leitura de plataforma. |
 | `server/src/environment/`, `net/bots.ts` | Fatos do ambiente (janela privada, placa virtual) e robôs de busca verificados por DNS (Fase 10). |
+| `server/src/reachability/`, `net/asn.ts` | Receptor dos avisos do carregador (SQLite, sem IP), resumo e tabela opcional de redes (ASN). |
 | `server/src/mysql/`, `migrate.ts` | MySQL (banco de produção), vez entre instâncias, limites compartilhados e a migração do SQLite. |
 | `server/src/eval/` | Harness de avaliação (Fase 0): dataset, pares, pontuadores, estatística, relatório, gerador sintético. |
 | `tools/calibration/` | Página de coleta com consentimento para voluntários. |
@@ -63,9 +72,9 @@ O Yarn não vem instalado. Use `npx --yes yarn@1.22.22 <comando>` (abreviado aqu
 
 ```bash
 yarn install --frozen-lockfile --ignore-scripts --ignore-engines   # primeira vez; --ignore-scripts evita o husky mexer no git
-yarn build            # bundle do navegador em dist/
+yarn build            # bundles do navegador em dist/: fp.min.js (coletor) e fp-loader.min.js (carregador)
 yarn lint             # tem de passar com zero avisos (--max-warnings 0)
-yarn test:local       # Karma: Chrome e Firefox headless (262 testes)
+yarn test:local       # Karma: Chrome e Firefox headless (283 testes)
 yarn check:dts && yarn check:ssr   # as duas checagens extras do CI
 yarn server:build && yarn server:test   # servidor (Fase 2); precisa de Node 22 por causa do node:sqlite
 FP_TEST_MYSQL_URL=mysql://root:senha@127.0.0.1:3306 yarn server:test   # inclui os testes de contrato do MySQL (cada teste cria e apaga um banco)
@@ -79,6 +88,8 @@ node server/dist/cli.js eval dataset.jsonl --out relatorio.md      # precisa de 
 node server/dist/cli.js fit-model dataset.jsonl --out model.json   # aprende os parâmetros (precisa de centenas de aparelhos)
 node server/dist/cli.js eval-identity dataset.jsonl --model model.json   # motor contra o hash original, em ordem de tempo
 node server/dist/cli.js last-events --config cfg.json --tenant <id>   # últimas visitas e o IP que o servidor viu
+node server/dist/cli.js reachability-receiver --db reach.db --port 8090 --allowed-origin https://app.exemplo.com   # recebe os avisos do carregador (coletor inalcançável); não grava IP
+node server/dist/cli.js reachability-summary --db reach.db --days 30   # resumo desses avisos, em português
 node server/dist/cli.js migrate-sqlite --from events.db --config cfg-mysql.json   # copia um SQLite para o MySQL e confere
 node server/dist/cli.js delete-linked --config cfg.json --tenant <id> --linked-id <codigo>  # retirada de participante
 docker build -f server/Dockerfile -t fingerprint-server .   # na raiz do repositório

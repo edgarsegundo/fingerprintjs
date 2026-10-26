@@ -367,6 +367,34 @@ You can run more than one server on the same database. What is shared, and what 
 The retention pass runs in every instance and is safe to repeat. Not verified: more than two instances, a database behind a
 proxy that changes connections between statements (named locks need a connection that stays), and a cluster of MySQL.
 
+## Reports of a collector that could not be reached
+
+The server cannot see a visitor whose network blocks its port or whose blocker stops the collector. The loader in the
+browser (`docs/collector.md`, "Loader") sees it and posts a small report to an address on the customer's own site. A
+second process of the same image receives those reports:
+
+```bash
+node dist/cli.js reachability-receiver --db /data/reach.db --host 0.0.0.0 --port 8090 \
+  --allowed-origin https://app.example.com --trust-forwarded-from 172.18.0.0/16 --keep-days 90
+node dist/cli.js reachability-summary --db /data/reach.db --days 30 [--utc-offset -3] [--json]
+```
+
+- It is public and has no key, so the body is limited to 4 KB, the shape is closed (anything else in the body is dropped),
+  the `Origin` is checked, and there is a limit per address (an IPv6 one by its /64) and a total one
+  (`--rate-per-ip`, `--rate-total`, per minute). `X-Forwarded-For` is believed only from `--trust-forwarded-from`, read from
+  the right. Put it behind the proxy of the customer's site and do not publish its port.
+- **The address is never stored.** It is used at that moment to look up the network and to make `prefix_hash`, a keyed hash
+  of the /24 (IPv4) or /64 (IPv6) that counts distinct networks. The key is in `<db>.secret` (mode 0600) or `--secret-file`.
+  The `User-Agent` is read and dropped: only the browser family and whether it is a phone are kept.
+- `--asn-file networks.csv --asn-from 0 [--asn-to 1] --asn-number 2 --asn-name 3` names the networks. The project ships no
+  data and assumes no provider's layout: the columns are the operator's (counted from 0), a wrong one stops the start with
+  the line number, and only the number and the name are stored. Check the licence of the file you use.
+- The summary is in Portuguese: by reason, probe, browser, hour of the day (a peak in every network at once means the server
+  was down, not a network blocking it) and network. It counts reports, not visitors: divide by the sign-ups of the period.
+
+Analysis, limits and what was not verified (Safari, a real network that blocks the port):
+`docs/plano/detectar-bloqueio-da-porta-8443-e-do-coletor-aviso-de-falha-loader-receptor-asn-lgpd.md`.
+
 ## Limits you should know
 
 - **Node cannot see everything.** `remoteSettings` of an HTTP/2 client lists every setting with the protocol default for the

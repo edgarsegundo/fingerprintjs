@@ -32,6 +32,7 @@ Veja [06-fechamento-e-autocritica.md](06-fechamento-e-autocritica.md): verifica�
 | 9 | Diferenciais inovadores (deriva, coleta guiada, k-anonimato) | código concluído; **sem dados reais** | [fase-9](fases/fase-9-diferenciais-e-grafo.md) |
 | SaaS | Multi-tenant isolado: tenants dinâmicos, planos, uso, cotas | código concluído; **sem faturamento, painel de cliente, DPA ou SLA** | [saas](fases/fase-saas-multitenant.md) |
 | 10 | O que dava para fazer sem dados: juntar e separar aparelhos, robôs por DNS, código guardado, ambiente, vários servidores, busca em escala, listas de IP com colunas, migração para MySQL | código concluído; **sem número de precisão**; código guardado precisa de parecer | [fase-10](fases/fase-10-sem-dados.md) |
+| 10b | Medir quem não alcança o servidor (porta 8443 bloqueada, bloqueadores): carregador, receptor de avisos sem IP, resumo e rede opcional (D96 a D99) | código concluído e testado (mutação, Chrome e Firefox, Docker); **Safari e uma rede bloqueada de verdade não verificados**; a mudança para a 443 está só documentada | [detectar-bloqueio](detectar-bloqueio-da-porta-8443-e-do-coletor-aviso-de-falha-loader-receptor-asn-lgpd.md) |
 | Grafo | Grafo compartilhado entre clientes (D3) | mecanismo pronto, **desligado e travado**; sem parecer não liga | [grafo](privacidade/grafo-compartilhado.md) |
 
 Ordem do uso próprio ao SaaS: 0, 1, 2, 3, 4, 5, 6, 7, SaaS, 8, Grafo, 9. A Fase 0 deveria vir antes da 3, porque o

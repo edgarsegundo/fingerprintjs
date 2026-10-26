@@ -78,6 +78,51 @@ await collectAndSend(
 A nonce prevents replaying a captured payload; it does not prove the payload is honest. The client code is public, so a
 determined attacker can craft any payload. The extended signals below are evidence for the server to weigh, not verdicts.
 
+## Loader (when the collector cannot be reached)
+
+If a network blocks the port of your fingerprint server, the collector script (served by that server) never loads, so
+it cannot say anything, and the server never sees the visit. The loader is a separate file, `dist/fp-loader.min.js`
+(global `FpLoader`, about 6 KB), that you serve from your **own site**. It loads the collector, collects and sends, and
+when anything fails it posts one small report to an address on your own site.
+
+```html
+<script src="/fp-loader.min.js" defer></script>
+<script>
+  FpLoader.start({
+    scriptUrl: 'https://id.example.com:8443/static/collector.js', // where the server serves the collector
+    endpoint: 'https://id.example.com:8443', // the server: /v1/nonce, /v1/collect, /healthz
+    publicKey: 'pk_...',
+    reportTo: '/fp-report', // an address on your own site, handled by `reachability-receiver`
+    linkedId: String(accountId),
+  }) // resolves with { ok: true, requestId } or { ok: false, reason, status? }; never rejects
+</script>
+```
+
+| Option | Meaning |
+|---|---|
+| `scriptUrl`, `endpoint`, `publicKey`, `reportTo` | Required. See above. |
+| `linkedId` | Passed to the collector. **Never sent in the report.** |
+| `collectOptions` | Passed to `collect` (`consent`, `exclude`, `include`, ...). The `profile` that the server may send with the challenge is applied as with `profileToOptions`. |
+| `timeoutMs` | How long to wait for the script and for each request. Default 8000. |
+| `probeTimeoutMs` | How long to wait for the probe. Default 4000. |
+| `successSampleRate` | Share (0 to 1) of the visits that worked that also send an `ok` report, to give the receiver a denominator. Default 0. |
+
+On a failure the loader sends `GET {endpoint}/healthz` with `mode: 'no-cors'`. The browser tells nothing about such an
+answer, only whether a connection could be made: if it could, the server is up and something between the page and it
+(a blocker, a content policy, a missing CORS header) stopped the request; if not, the network is blocking the port, or the
+server is down. The reasons are `script_unreachable`, `script_blocked`, `script_broken`, `request_unreachable`,
+`request_blocked`, `timeout`, `server_refused` (with the HTTP status), `server_error` and `collect_error`. **The reason is an
+estimate.** A wrong public key or an origin that is not allowed also shows as `request_blocked`: the server then answers
+without CORS headers and the browser reports only "failed".
+
+The report is a JSON of under 600 bytes sent with `navigator.sendBeacon` (with `fetch` and `keepalive` as the fallback):
+`{ v: 1, reason, phase, probe, elapsedMs, online?, connection?, status?, site }`. It carries no URL, cookie, `linkedId`
+or signal. It is sent once per tab session, and not at all when the browser says it is offline. The loader never throws,
+and it never waits for something that the page needs.
+
+The receiver (`node server/dist/cli.js reachability-receiver`) and the summary (`reachability-summary`) are described in
+`server/README.md`. In Portuguese, with the privacy analysis: `docs/plano/detectar-bloqueio-da-porta-8443-e-do-coletor-aviso-de-falha-loader-receptor-asn-lgpd.md`.
+
 ## Extended signals
 
 | Key | What it is | Use | Caveat |

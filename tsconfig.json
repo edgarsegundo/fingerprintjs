@@ -16,6 +16,7 @@
   // and preferably nothing else in order not to compile excess files
   "include": [
     "src/index.ts",
+    "src/loader/index.ts",
     "src/**/*.d.ts",
     "resources/content_blocking/selectors_tester.ts"
   ],
