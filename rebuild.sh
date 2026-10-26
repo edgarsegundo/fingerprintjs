@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install or update the fingerprint server on the VPS: pull, build the image and the browser scripts,
-# refresh the collector and restart the containers. Safe to run again at any time.
+# refresh the collector, restart the containers and publish the PWA (so the new loader goes live).
+# Safe to run again at any time.
 #
 # Usage (on the VPS, from the repository clone):
 #   ./rebuild.sh [--no-pull] [--no-restart]
@@ -77,6 +78,14 @@ for dest in "${LOADER_DESTINATIONS[@]}"; do
   fi
 done
 
+PWA_REPO="$HOME/Repos/emprego"
+if [ -x "$PWA_REPO/deploy-pwa.sh" ]; then
+  step "Publicando o PWA (build + deploy, para levar o carregador novo ao ar)"
+  (cd "$PWA_REPO" && ./deploy-pwa.sh)
+else
+  echo "  $PWA_REPO/deploy-pwa.sh não encontrado, pulei o deploy do PWA" >&2
+fi
+
 CONFIG="$PROXY/fingerprint/config"
 if [ ! -f "$CONFIG/config.json" ]; then
   echo
@@ -123,6 +132,10 @@ fi
 cat <<EOF
 
 Pronto.
+EOF
+if [ ! -x "$PWA_REPO/deploy-pwa.sh" ]; then
+  cat <<EOF
 Carregador para o PWA: $FP_REPO/dist/fp-loader.min.js
   copie para public/ do PWA e faça o deploy do PWA (guia, seção G2).
 EOF
+fi
